@@ -10,18 +10,19 @@ WHITE = "#FFFFFF"
 NAVY = "#14263D"
 TEXT = "#192D47"
 MUTED = "#5B708F"
-BLUE = "#195AA5"
-BLUE_HOVER = "#124780"
-PALE_BLUE = "#E9F2FF"
-BORDER = "#D3E0EF"
+BLUE = "#1757A0"
+BLUE_HOVER = "#A7D5FF"
+PALE_BLUE = "#EAF4FF"
+BORDER = "#D8E2ED"
 GREEN = "#1D6A3D"
 PALE_GREEN = "#EAF7E7"
 AMBER = "#9A5B00"
 PALE_AMBER = "#FFF3DA"
 RED = "#A92A36"
 PALE_RED = "#FDECEE"
-FONT = "Segoe UI"
-MONO = "Consolas"
+FONT = "Open Sans"
+MONO = "IBM Plex Mono"
+EMPTY_SCAN_MESSAGE = "No devices responded to discovery in this range"
 
 
 def label(parent, text="", size=10, bold=False, color=TEXT, bg=WHITE, **kwargs):
@@ -202,7 +203,7 @@ class DeviceTable(tk.Frame):
         if selection and not self.updating:
             self.on_select(selection[0])
 
-    def set_devices(self, devices, selected_ip=None):
+    def set_devices(self, devices, selected_ip=None, *, scan_completed=False):
         self.updating = True
         try:
             self.tree.delete(*self.tree.get_children())
@@ -218,6 +219,8 @@ class DeviceTable(tk.Frame):
             if devices:
                 self.empty.place_forget()
             else:
+                self.empty.configure(text=(EMPTY_SCAN_MESSAGE if scan_completed else
+                                           "No devices detected. Use Scan Network to begin."))
                 self.empty.place(relx=.5, rely=.5, anchor="center")
         finally:
             self.updating = False

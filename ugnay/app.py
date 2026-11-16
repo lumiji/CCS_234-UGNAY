@@ -13,6 +13,7 @@ from threading import Thread
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+
 from .connectivity import ConnectivityService
 from .demo_data import (
     SAMPLE_DEVICES, SAMPLE_NETWORK, SAMPLE_RECOMMENDATIONS, SAMPLE_REPORTS, SAMPLE_TIME,
@@ -62,6 +63,7 @@ class UgnayApp(tk.Tk):
         self.current_page = "Overview"
         self.busy = False
         self._closing = False
+        self.last_ping_time = None
         self._ui_queue = Queue()
         self.icons = IconStore(self)
         self.tables = []
@@ -525,7 +527,12 @@ class UgnayApp(tk.Tk):
             var.set(value)
         self.network_label.configure(text=(f"{self.network.local_ip}  ·  {self.network.subnet}"
                                            if self.network else "Local IP and subnet not detected"))
-        self.network_scan_label.configure(text=f"Last scan\n{timestamp(self.last_scan)}")
+        self.network_scan_label.configure(
+    text=(
+        f"Last scan\n{timestamp(self.last_scan)}\n\n"
+        f"Last ping test\n{timestamp(self.last_ping_time)}"
+    )
+)
         self.device_count_label.configure(text=f"{len(self.devices)} devices {'in sample data' if self.sample_devices else 'detected in the latest scan'}")
         for table in self.tables:
             table.set_devices(tuple(self.devices.values()), self.selected_ip)
@@ -567,9 +574,13 @@ class UgnayApp(tk.Tk):
             # remain entirely in Member 2's future service implementation.
             successful = sum(reply.latency_ms is not None for reply in result.replies)
             self.overview_replies.configure(text=f"{successful} of {len(result.replies)} replies")
-            self.overview_reply_values.configure(text="   ".join(
-                latency(r.latency_ms) if r.latency_ms is not None else "Timed out" for r in result.replies))
-            self.ping_result_title.configure(text="Sample test results" if self.sample_devices else "Latest ping test")
+            self.overview_reply_values.configure(text="   ".join(latency(r.latency_ms) if r.latency_ms is not None else "Timed out" for r in result.replies))
+            self.ping_result_title.configure(
+                text="Sample test results"
+                if self.sample_devices and result.tested_at == SAMPLE_TIME
+                else "Latest ping test"
+            )
+
             self.ping_result_subtitle.configure(text=f"{len(result.replies)} requests · {timestamp(result.tested_at)}")
             lines = [f"{r.sequence}.  Request timed out." if r.latency_ms is None
                      else f"{r.sequence}.  Reply from {device.ip_address}: time={r.latency_ms:.1f} ms"
@@ -663,24 +674,129 @@ class UgnayApp(tk.Tk):
                              else "Scan complete · No active devices found in this network range")
 
     # MEMBER 2 integration: service output -> apply_ping_result(result).
+
     def on_test_connection(self):
+        """Start a connectivity test for the selected device."""
         device = self.selected_device
+
         if not device:
-            self.status_text.set("Select a device before running a connectivity test.")
+            self.status_text.set(
+                "Please select a device before running a ping test."
+            )
+            messagebox.showwarning(
+                "No Device Selected",
+                "Please select a device to test.",
+                parent=self,
+            )
             return
+
         count = int(self.ping_count.get())
-        self._start_task(f"Testing {device.ip_address}",
-                         partial(self.connectivity.test_connection, device, count),
-                         self.apply_ping_result)
+
+        self._start_task(
+            f"Sending {count} ping requests to {device.ip_address}",
+            partial(
+                self.connectivity.test_connection,
+                device,
+                count,
+            ),
+            self.apply_ping_result,
+        )
+
 
     def apply_ping_result(self, result):
-        """UI-thread entry point; also handles all-timeout/unreachable results."""
+
+        """Update the interface and notify the user after a ping test."""
+
         if result.ip_address not in self.devices:
-            self.status_text.set("Test result ignored: this device is no longer in the current scan.")
+            self.status_text.set(
+                "Test result ignored: device is no longer in the current scan."
+            )
             return
-        self.devices[result.ip_address] = replace(self.devices[result.ip_address], result=result)
+
+        # Check if the device responded.
+        successful = any(
+            reply.latency_ms is not None
+            for reply in result.replies
+        )
+
+        # Update the connectivity result and Last seen.
+        self.devices[result.ip_address] = replace(
+            self.devices[result.ip_address],
+            result=result,
+            last_seen=(
+                result.tested_at
+                if successful
+                else self.devices[result.ip_address].last_seen
+            ),
+        )
+
+        self.last_ping_time = result.tested_at
         self.refresh_views()
-        self.status_text.set(f"Test complete · {result.ip_address} · {result.status.value}")
+
+        # Keep your existing notification code below this line.
+
+
+        # Save the real ping result and update all related screens.
+        self.devices[result.ip_address] = replace(
+            self.devices[result.ip_address],
+            result=result,
+        )
+
+        self.refresh_views()
+
+        total = len(result.replies)
+        successful = sum(
+            reply.latency_ms is not None
+            for reply in result.replies
+        )
+
+        if successful == 0:
+            title = "No Ping Response"
+            message = (
+                f"Ping test completed for {result.ip_address}.\n\n"
+                f"Requests sent: {total}\n"
+                f"Replies received: 0\n"
+                f"Packet loss: 100%\n\n"
+                "No ping responses were received.\n"
+                "The device may be unavailable or may block ICMP requests."
+            )
+            notification = messagebox.showwarning
+            status = "No ping response"
+
+        elif result.packet_loss_percent > 0:
+            title = "Packet Loss Detected"
+            message = (
+                f"Ping test completed for {result.ip_address}.\n\n"
+                f"Successful replies: {successful}/{total}\n"
+                f"Average latency: {result.average_latency_ms:.1f} ms\n"
+                f"Maximum latency: {result.maximum_latency_ms:.1f} ms\n"
+                f"Packet loss: {result.packet_loss_percent:.1f}%\n\n"
+                "Some ping requests did not receive a response.\n"
+                "Consider repeating the test to check whether "
+                "the issue persists."
+            )
+            notification = messagebox.showwarning
+            status = "Packet loss detected"
+
+        else:
+            title = "Ping Test Completed"
+            message = (
+                f"Connection test completed for {result.ip_address}.\n\n"
+                f"Successful replies: {successful}/{total}\n"
+                f"Average latency: {result.average_latency_ms:.1f} ms\n"
+                f"Maximum latency: {result.maximum_latency_ms:.1f} ms\n"
+                f"Packet loss: 0%\n\n"
+                "The device responded to all ping requests."
+            )
+            notification = messagebox.showinfo
+            status = "Responding"
+
+        self.status_text.set(
+            f"Test complete - {result.ip_address} - {status}"
+        )
+
+        # Display the notification after refreshing the results.
+        notification(title, message, parent=self)
 
     # MEMBER 3 integration: output -> apply_report(report); export is a stub.
     def on_generate_report(self):

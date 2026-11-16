@@ -9,8 +9,8 @@ import sys
 from .models import Device, DiscoveryResult, NetworkInfo
 
 
-# Return only plain fields, not CIM objects or localized, formatted tables.
-# -All lets Python prefer physical LAN adapters while retaining virtual fallbacks.
+# Query Windows for IPv4 addresses and subnet prefixes on active
+#  non-loopback adapters as JSON.
 _NETWORK_QUERY = r"""
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -41,7 +41,8 @@ $records = @(foreach ($config in (Get-NetIPConfiguration -All)) {
 ConvertTo-Json -InputObject $records -Compress
 """
 
-
+# Ping the requested IP with the given timeout 
+# and return the status and reply address as JSON.
 _PROBE_QUERY = r"""
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -99,6 +100,8 @@ class NetworkScanError(RuntimeError):
     """Discovery could not execute reliably; this is not an empty scan result."""
 
 
+# Detect the local IPv4 subnet on Windows and 
+# find devices that respond to ping in the requested range.
 class DiscoveryService:
     def __init__(self, *, interface_alias: str | None = None, max_workers: int = 16,
                  icmp_timeout_ms: int = 1000, process_timeout: float = 10.0,
@@ -135,6 +138,7 @@ class DiscoveryService:
         gateway, DNS lookup, or internet connection is required. Link-local IPv4
         remains usable for an isolated LAN when no better address is available.
         """
+
         self._network = None
         if sys.platform != "win32":
             raise NetworkDetectionError("Local network detection currently supports Windows only.")

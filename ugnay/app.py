@@ -1,7 +1,8 @@
 """UGNAY's complete Tkinter shell. Backend work belongs in the service stubs.
 
 Navigation, selections, rendering, dialogs, and the worker/UI handoff are real.
-Scans, pings, report generation, analysis, and export are NOT implemented.
+Windows device discovery is implemented. Ping tests, report generation,
+analysis, and export remain service stubs.
 """
 
 from dataclasses import replace
@@ -17,11 +18,11 @@ from .connectivity import ConnectivityService
 from .demo_data import (
     SAMPLE_DEVICES, SAMPLE_NETWORK, SAMPLE_RECOMMENDATIONS, SAMPLE_REPORTS, SAMPLE_TIME,
 )
-from .discovery import DiscoveryService
-from .models import DeviceStatus
+from .discovery import DiscoveryService, NetworkDetectionError
+from .models import DeviceStatus, DiscoveryResult
 from .reporting import ReportingService
 from .widgets import (
-    ActionButton, BG, BLUE, BORDER, DeviceTable, FONT, GREEN, IconStore,
+    ActionButton, BG, BLUE, BORDER, DeviceTable, EMPTY_SCAN_MESSAGE, FONT, GREEN, IconStore,
     MONO, MUTED, NAVY, Notice, PALE_BLUE, ReplyChart, RoundedPanel,
     ScrollablePage, StatusBadge, TEXT, WHITE, label,
 )
@@ -41,7 +42,7 @@ def timestamp(value):
 
 
 class UgnayApp(tk.Tk):
-    def __init__(self, discovery=None, connectivity=None, reporting=None, demo=True):
+    def __init__(self, discovery=None, connectivity=None, reporting=None, demo=False):
         super().__init__()
         self.title("UGNAY | LAN Health Checker")
         self.geometry("1320x850")
@@ -70,7 +71,9 @@ class UgnayApp(tk.Tk):
         self._action_buttons = []
         self.ping_count = tk.StringVar(self, "4")
         self.device_choice = tk.StringVar(self)
-        self.status_text = tk.StringVar(self, "Ready · Sample data loaded · Backend services are not connected")
+        initial_status = ("Ready · Sample data loaded · Scan Network to discover devices" if demo
+                          else "Ready · Scan Network to discover devices")
+        self.status_text = tk.StringVar(self, initial_status)
         self._configure_styles()
         self._build_shell()
         self._build_overview()
@@ -512,7 +515,12 @@ class UgnayApp(tk.Tk):
 
     def refresh_views(self):
         sample = "SAMPLE DATA · Example network and device entries are loaded."
-        caption = sample if self.sample_devices else "Scan and connectivity results"
+        if self.sample_devices:
+            caption = sample
+        elif self.last_scan is None:
+            caption = "No scan results yet. Use Scan Network to discover devices."
+        else:
+            caption = "Scan and connectivity results"
         for widget in (self.overview_caption, self.devices_caption, self.ping_caption):
             widget.configure(text=caption)
         values = (
@@ -528,7 +536,8 @@ class UgnayApp(tk.Tk):
         self.network_scan_label.configure(text=f"Last scan\n{timestamp(self.last_scan)}")
         self.device_count_label.configure(text=f"{len(self.devices)} devices {'in sample data' if self.sample_devices else 'detected in the latest scan'}")
         for table in self.tables:
-            table.set_devices(tuple(self.devices.values()), self.selected_ip)
+            table.set_devices(tuple(self.devices.values()), self.selected_ip,
+                              scan_completed=self.last_scan is not None)
         self.device_combo.configure(values=tuple(f"{d.display_name} — {d.ip_address}" for d in self.devices.values()))
         self._refresh_selection()
         self._refresh_report_history()
@@ -645,12 +654,13 @@ class UgnayApp(tk.Tk):
 
     # MEMBER 1 integration: service output -> apply_discovery_result(result).
     def on_scan_network(self):
+        """Run both discovery service calls on the existing background worker."""
         def work():
             network = self.discovery.detect_network()
             return self.discovery.scan_network(network.subnet)
         self._start_task("Scanning network", work, self.apply_discovery_result)
 
-    def apply_discovery_result(self, result):
+    def apply_discovery_result(self, result: DiscoveryResult):
         """UI-thread entry point; accepts DiscoveryResult, including no devices."""
         self.network = result.network
         self.last_scan = result.scanned_at
@@ -660,7 +670,7 @@ class UgnayApp(tk.Tk):
             self.selected_ip = next(iter(self.devices), None)
         self.refresh_views()
         self.status_text.set(f"Scan complete · {len(self.devices)} devices detected" if self.devices
-                             else "Scan complete · No active devices found in this network range")
+                             else f"Scan complete · {EMPTY_SCAN_MESSAGE}")
 
     # MEMBER 2 integration: service output -> apply_ping_result(result).
     def on_test_connection(self):
@@ -714,9 +724,11 @@ class UgnayApp(tk.Tk):
 
     # Async plumbing only; never invoke Tk from worker threads.
     def post_to_ui(self, callback, *args):
+        """Enqueue a UI callback without invoking any Tkinter methods."""
         self._ui_queue.put(partial(callback, *args))
 
     def _start_task(self, title, work, on_success):
+        """UI callback: set busy state, run service work, and queue completion."""
         if self.busy:
             return
         self.busy = True
@@ -731,15 +743,22 @@ class UgnayApp(tk.Tk):
                 self.post_to_ui(self._finish_task, title, None, on_success, error)
             else:
                 self.post_to_ui(self._finish_task, title, result, on_success, None)
-        Thread(target=worker, daemon=True, name="ugnay-service").start()
+        try:
+            Thread(target=worker, daemon=True, name="ugnay-service").start()
+        except RuntimeError as error:
+            # Thread startup itself can fail before worker() can queue a result.
+            self._finish_task(title, None, on_success, error)
 
     def _finish_task(self, title, result, on_success, error):
+        """UI callback: restore controls and render the result or show the error."""
         self.busy = False
         self.progress.stop()
         self._update_action_states()
         if isinstance(error, NotImplementedError):
             self.status_text.set(f"Integration pending · {error}")
             messagebox.showinfo("Integration point", f"{error}\n\nThis version contains the interface and service stubs only.", parent=self)
+        elif isinstance(error, NetworkDetectionError):
+            self.show_operation_error("Network detection", error)
         elif error is not None:
             self.show_operation_error(title, error)
         else:

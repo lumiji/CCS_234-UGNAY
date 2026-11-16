@@ -1,9 +1,4 @@
-"""UGNAY's complete Tkinter shell. Backend work belongs in the service stubs.
-
-Navigation, selections, rendering, dialogs, and the worker/UI handoff are real.
-Windows device discovery is implemented. Ping tests, report generation,
-analysis, and export remain service stubs.
-"""
+"""UGNAY's complete Tkinter shell."""
 
 from dataclasses import replace
 from datetime import datetime

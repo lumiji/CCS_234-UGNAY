@@ -20,6 +20,9 @@ from urllib.parse import urlsplit
 
 from .auth import AuthError, AuthStore
 from .discovery import DiscoveryService
+from .connectivity import ConnectivityService
+from .dashboard_store import DashboardStore
+from .models import Device
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,12 +32,14 @@ LOGGER = logging.getLogger(__name__)
 class WebServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, database, discovery=None):
+    def __init__(self, address, database, discovery=None, connectivity=None):
         self.auth = AuthStore(database)
         self.discovery = discovery if discovery is not None else DiscoveryService()
+        self.connectivity = connectivity if connectivity is not None else ConnectivityService()
+        self.dashboard = DashboardStore(self.auth)
         self.lock = threading.Lock()
         self.attempts = defaultdict(deque)
-        self.network = {"busy": False, "network": None, "devices": [], "scanned_at": None, "error": None}
+        self.network = self.dashboard.snapshot() | {"busy": False, "operation": None, "testing_device": None, "error": None}
         super().__init__(address, Handler)
 
     def throttle(self, address, identifier):
@@ -51,31 +56,73 @@ class WebServer(ThreadingHTTPServer):
             for key, _ in keys:
                 self.attempts[key].append(now)
 
-    def start_scan(self):
+    def reload_dashboard(self):
+        """Caller holds self.lock, so publication and metadata changes stay ordered."""
+        self.network = self.network | self.dashboard.snapshot()
+
+    def operation_failed(self, kind, error, actor, device_id=None):
+        with self.lock:
+            # Always restore controls, even if the database itself caused failure.
+            self.network = self.network | {"busy": False, "operation": None, "testing_device": None, "error": str(error)}
+            try:
+                self.dashboard.activity(kind, f"{'Scan' if kind == 'scan_failed' else 'Ping test'} failed: {error}", actor, device_id)
+                self.reload_dashboard()
+            except Exception:
+                LOGGER.exception("Could not persist the failed network operation")
+
+    def start_scan(self, actor="System"):
         with self.lock:
             if self.network["busy"]:
-                raise AuthError("A discovery scan is already running.", 409)
-            self.network = self.network | {"busy": True, "error": None}
+                raise AuthError("A network operation is already running. Please wait.", 409)
+            self.network = self.network | {"busy": True, "operation": "scan", "error": None}
 
         def scan():
             try:
                 network = self.discovery.detect_network()
                 result = self.discovery.scan_network(network.subnet)
-                state = {"busy": False, "network": {"local_ip": result.network.local_ip, "subnet": result.network.subnet},
-                         "devices": [{"ip_address": d.ip_address, "hostname": d.hostname, "status": d.status.value}
-                                     for d in result.devices], "scanned_at": result.scanned_at.isoformat(), "error": None}
                 with self.lock:
-                    self.network = state
+                    self.dashboard.save_scan(result, actor)
+                    self.reload_dashboard()
+                    self.network = self.network | {"busy": False, "operation": None, "error": None}
             except Exception as error:
                 LOGGER.exception("Network discovery failed")
-                with self.lock:
-                    self.network = self.network | {"busy": False, "error": str(error)}
+                self.operation_failed("scan_failed", error, actor)
         try:
             threading.Thread(target=scan, name="ugnay-web-discovery", daemon=True).start()
         except RuntimeError:
             with self.lock:
-                self.network = self.network | {"busy": False, "error": "Could not start discovery. Please try again."}
+                self.network = self.network | {"busy": False, "operation": None, "error": "Could not start discovery. Please try again."}
             raise AuthError("Could not start discovery. Please try again.", 503) from None
+
+    def start_ping(self, identifier, count, actor):
+        if type(count) is not int or count not in (4, 10, 20):
+            raise AuthError("Ping count must be 4, 10, or 20.")
+        with self.lock:
+            if self.network["busy"]:
+                raise AuthError("A network operation is already running. Please wait.", 409)
+            device = next((device for device in self.network["devices"] if device["id"] == identifier), None)
+            if device is None:
+                raise AuthError("This device is not in the latest scan. Scan again before testing it.", 409)
+            self.network = self.network | {"busy": True, "operation": "ping", "testing_device": identifier, "error": None}
+
+        def ping():
+            try:
+                result = self.connectivity.test_connection(Device(device["ip_address"], device["hostname"]), count)
+                if result.ip_address != device["ip_address"]:
+                    raise ValueError("Ping service returned a result for a different device.")
+                with self.lock:
+                    self.dashboard.save_ping(identifier, result, actor)
+                    self.reload_dashboard()
+                    self.network = self.network | {"busy": False, "operation": None, "testing_device": None, "error": None}
+            except Exception as error:
+                LOGGER.exception("Ping test failed")
+                self.operation_failed("ping_failed", error, actor, identifier)
+        try:
+            threading.Thread(target=ping, name="ugnay-web-ping", daemon=True).start()
+        except RuntimeError:
+            with self.lock:
+                self.network = self.network | {"busy": False, "operation": None, "testing_device": None}
+            raise AuthError("Could not start the ping test. Please try again.", 503) from None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -122,16 +169,19 @@ class Handler(BaseHTTPRequestHandler):
         return user, csrf, expires
 
     def body(self):
-        host = self.headers.get("Host")
-        if self.headers.get("Origin") != f"http://{host}":
-            raise AuthError("Request origin is not allowed.", 403)
-        if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
-            raise AuthError("Send an application/json request.", 415)
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 16384:
                 raise AuthError("Request is too large or empty.", 413)
-            value = json.loads(self.rfile.read(length))
+            # Consume the bounded body before rejecting headers. Closing a socket
+            # with unread request bytes can discard the error response on Windows.
+            raw = self.rfile.read(length)
+            host = self.headers.get("Host")
+            if self.headers.get("Origin") != f"http://{host}":
+                raise AuthError("Request origin is not allowed.", 403)
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                raise AuthError("Send an application/json request.", 415)
+            value = json.loads(raw)
             if not isinstance(value, dict):
                 raise ValueError
             return value
@@ -158,6 +208,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/network":
                 self.require("network.view")
                 with self.server.lock:
+                    current = self.server.network
+                    # Basic network access never exposes administrator labels,
+                    # trust decisions, activity, topology, or historical reports.
+                    state = {key: current[key] for key in (
+                        "busy", "operation", "testing_device", "error", "network", "scanned_at", "metrics")}
+                    state["devices"] = [{key: device[key] for key in (
+                        "id", "ip_address", "hostname", "status", "ping")} for device in current["devices"]]
+                self.send(200, state)
+            elif path == "/api/admin/dashboard":
+                user, _, _ = self.require("dashboard.view")
+                if user["role"] != "admin":
+                    raise AuthError("Administrator access is required for this dashboard.", 403)
+                with self.server.lock:
                     state = self.server.network.copy()
                 self.send(200, state)
             elif path == "/api/admin/users":
@@ -177,7 +240,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def static(self, path):
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"),
-                 "/styles.css": ("styles.css", "text/css"), "/app.js": ("app.js", "text/javascript")}
+                 "/styles.css": ("styles.css", "text/css"), "/app.js": ("app.js", "text/javascript"),
+                 "/dashboard.css": ("dashboard.css", "text/css"), "/dashboard.js": ("dashboard.js", "text/javascript")}
         if path in files:
             filename, mime = files[path]
             target = ROOT / "web" / filename
@@ -218,9 +282,19 @@ class Handler(BaseHTTPRequestHandler):
             self.server.auth.logout(self.token())
             self.send(200, {"ok": True}, cookie="ugnay_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
         elif path == "/api/network/scan":
-            self.require("network.scan", mutation=True)
-            self.server.start_scan()
+            actor, _, _ = self.require("network.scan", mutation=True)
+            self.server.start_scan(actor["username"])
             self.send(202, {"ok": True})
+        elif re.fullmatch(r"/api/devices/\d+/ping", path):
+            actor, _, _ = self.require("network.test", mutation=True)
+            self.server.start_ping(int(path.split("/")[3]), data.get("count", 4), actor["username"])
+            self.send(202, {"ok": True})
+        elif re.fullmatch(r"/api/devices/\d+", path):
+            actor, _, _ = self.require("devices.manage", mutation=True)
+            with self.server.lock:
+                device = self.server.dashboard.update_device(int(path.rsplit("/", 1)[1]), data, actor["username"])
+                self.server.reload_dashboard()
+            self.send(200, {"device": device})
         elif re.fullmatch(r"/api/admin/users/\d+", path):
             actor, _, _ = self.require("users.manage", mutation=True)
             user = self.server.auth.update_user(actor["id"], int(path.rsplit("/", 1)[1]), data)

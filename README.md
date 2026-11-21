@@ -36,8 +36,8 @@ regular user, regardless of fields submitted by the client.
 | Role | Permissions |
 | --- | --- |
 | Guest | View the latest discovery results; temporary access for up to two hours |
-| User | View results and run network discovery |
-| Admin | User permissions plus list accounts, change user/admin roles, enable/disable accounts, and reset passwords |
+| User | View results, run network discovery, and run ping tests |
+| Admin | User permissions plus label devices, set device trust, list accounts, change user/admin roles, enable/disable accounts, and reset passwords |
 
 The guest screen keeps the reference layout but disables the password field and
 Remember me because guests do not need credentials. Guest names are optional;
@@ -73,11 +73,69 @@ security configuration. The legacy `--desktop` interface remains a separate,
 unauthenticated local tool; web authentication does not protect direct OS or
 database access.
 
-After login, a small network workspace demonstrates the enforced permissions.
-Its Scan network action calls the existing discovery service on a background
-thread. No probes run at startup or on login. Results are shared by the local
-server's users and held in memory; a server restart clears them. Existing desktop
-ping and reporting screens have not been ported to the browser.
+After an administrator logs in, the admin-only dashboard shows a sidebar, top
+measurements, an interactive network map, and a collapsible device/activity board.
+Users and guests open a separate basic network overview with no admin map,
+trust decisions, activity feed, historical reports, or account controls. Users
+retain discovery and ping testing; guests retain read-only basic results.
+Scan network uses the same
+`DiscoveryService.detect_network()` and `scan_network()` path as the desktop app,
+on a background thread. No probes run at startup or login. The most recent
+successful scan is restored from SQLite after a server restart. Results are
+shared through role-appropriate APIs. Dashboard access requires both the admin
+role and `dashboard.view`; non-admin requests receive HTTP 403. Signing out clears
+rendered administrator data from the page before another account can sign in.
+
+### Dashboard and device recognition
+
+- Hover or focus a map node to preview its profile. Select it to keep the profile
+  open; Escape or the close button dismisses it. Names, IPs, and trust indicators
+  are visible on nodes. Selecting a table row opens the same profile.
+- Drag the map to pan. Use +/minus/Fit to zoom, or Ctrl+mouse wheel. Larger scans
+  use map pages (eight devices per page on desktop, four on mobile) to keep labels
+  readable. Search filters the full device list and map.
+- Check means Trusted, warning means Review, and x means Flagged. Every newly
+  discovered device starts in Review. Administrators can edit its label and trust
+  in its profile. These decisions persist across rescans and restarts.
+- Recognition is keyed by subnet and IP, because the discovery service does not
+  collect MAC addresses or hardware identity. DHCP address reuse can represent a
+  different device. Trust labels do not configure a firewall or block traffic.
+- Map lines show membership in the scanned subnet. ICMP discovery does not reveal
+  physical switch, router, Wi-Fi attachment, or device-to-device topology. The
+  central node represents the local subnet, without inventing physical links.
+- Use Test connection in a profile, or the Tests screen with 4, 10, or 20 requests.
+  This calls the desktop `ConnectivityService.test_connection()` implementation.
+  Ping metrics stay blank until an actual test completes. Latest Average Latency
+  and Packet Loss aggregate the latest saved replies for currently detected
+  devices; each profile includes its test time. All-timeout tests have no latency
+  value and 100% loss. Scan response and detailed ping results are distinct.
+- Scan and ping operations are serialized, matching the desktop busy state.
+  The browser polls for updates without blocking. Failures restore controls and
+  retain the last successful results. No-response devices may be asleep or block
+  ICMP; absence from a scan does not prove disconnection.
+- History shows saved scan timestamps/counts and recent activity. Reports shows
+  the latest snapshot and downloads a plain-text report from measured data.
+  This does not use or complete the desktop reporting service stub.
+- Settings controls background/map motion locally. System reduced-motion settings
+  take priority. Access retains the existing administrator account controls.
+
+SQLite additionally stores `discovered_devices`, `network_scans`,
+`device_ping_tests`, and `network_activity`. History retains up to 100 scans,
+1,000 ping tests, and 1,000 activity entries. The API exposes the latest 30 scan
+and test summaries and 50 activities. Known device recognition records persist.
+The interface only shows devices in the latest successful scan.
+
+| API | Access |
+| --- | --- |
+| `GET /api/network` | Any signed-in account; basic device and ping results, without admin metadata |
+| `GET /api/admin/dashboard` | Admin only; full map, recognition, activity, metrics, and history |
+| `POST /api/network/scan` | User/admin; no client-supplied subnet or command |
+| `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan and `count` 4/10/20 |
+| `POST /api/devices/{id}` | Admin; `label` and/or `trust` (`trusted`, `review`, `flagged`) |
+
+Device mutations also require the existing Origin and CSRF checks. New tables
+and permissions are added automatically at startup; existing accounts and
+credentials are preserved.
 
 ### Replace the placeholder graphics
 
@@ -91,10 +149,10 @@ JPEG, WebP, and ICO files with simple filenames from this folder. The orbital ma
 gradient motion are controlled by `web/styles.css`. Reduced-motion preferences
 disable animations.
 
-### Verify web authentication
+### Verify the web application
 
 ```powershell
-python -m unittest discover -s tests -p test_web_auth.py -v
+python -m unittest discover -s tests -v
 ```
 
 These tests use a temporary SQLite database and a fake discovery service. They
@@ -102,6 +160,9 @@ cover registration, hashed credentials and session tokens, cookie lifetime,
 login, logout, expiry, role escalation attempts, guest restrictions, CSRF/Origin
 checks, admin changes, password recovery, rate limits, and persistence. They do
 not scan the real network or create accounts in your application database.
+`tests/test_dashboard.py` additionally checks scan integration, subnet membership,
+trust/label persistence and scope, guest/user restrictions, measured ping results,
+timeouts, invalid targets, serialized operations, failed scans, and empty results.
 
 ## Original desktop interface
 
@@ -277,14 +338,19 @@ Network/broadcast addresses are excluded for ordinary subnets, both `/31`
 addresses are included, and `/32` scans its single address. Each candidate,
 including the local machine, is included only if it responds to an ICMP echo.
 
-A bounded thread pool runs PowerShell probes using
-`System.Net.NetworkInformation.Ping.Send`. Each probe exchanges JSON over stdin
-and stdout. Only `IPStatus.Success` (numeric value `0`) from the requested address
+A bounded thread pool runs lightweight, isolated Python helpers from
+`ugnay/icmp_probe.py`, calling Windows' native `IcmpSendEcho` API through `ctypes`.
+PowerShell runs once for adapter detection, rather than once for every address.
+Each probe exchanges JSON over stdin and stdout. Only a success status
+(numeric value `0`) from the requested address
 counts as a response; ICMP timeouts and unreachable statuses are ordinary misses.
 Resource/hardware errors and unknown ICMP statuses fail the scan rather than
 being counted as nonresponding devices.
-A missing probe command, failed process, process timeout, or malformed output
+A missing helper, failed process, repeated process timeout, or malformed output
 raises `NetworkScanError` instead of reporting a misleading empty scan.
+An interpreter/probe process timeout is retried once with a fresh helper. A normal
+ICMP no-response status is skipped without retry. The native handle is closed
+after each probe, and the parent can still terminate a stalled helper.
 
 Responders receive a best-effort `socket.gethostbyaddr()` lookup in a separate
 Python process with its own deadline. Lookup failures and timeouts leave
@@ -300,9 +366,9 @@ Limits and deadlines are configurable without adding third-party dependencies:
 
 ```python
 service = DiscoveryService(
-    max_workers=16,
+    max_workers=8,
     icmp_timeout_ms=1000,
-    process_timeout=10.0,  # Seconds, including PowerShell startup overhead.
+    process_timeout=15.0,  # Seconds per helper attempt, including interpreter startup.
     hostname_timeout=2.0,  # Seconds for each optional reverse lookup.
     max_hosts=1024,        # Usable candidate addresses, checked before any probes.
 )
@@ -313,7 +379,9 @@ result = service.scan_network(network.subnet)
 The process timeout must exceed the ICMP timeout by at least one second. The
 default host limit allows up to 1,024 candidates; an oversized range raises
 `ValueError` with its host count and configured limit. This prevents enumerating
-an unexpectedly large LAN. PowerShell startup adds overhead to each probe.
+an unexpectedly large LAN. At most eight probe/lookup tasks run concurrently by
+default, avoiding the startup load of many simultaneous PowerShell processes.
+The 15-second helper deadline is separate from the one-second ICMP reply timeout.
 
 The scan reuses the last successful detection on the same service instance. If
 called before detection, it detects the local network first. The UI calls
@@ -323,7 +391,14 @@ ICMP discovery finds responders rather than every connected device: devices
 that block ICMP or are asleep may be absent. ARP discovery is not implemented.
 The API behavior follows
 [Python's usable-host enumeration](https://docs.python.org/3/library/ipaddress.html#ipaddress.IPv4Network.hosts)
-and [Microsoft's ICMP status documentation](https://learn.microsoft.com/en-us/dotnet/api/system.net.networkinformation.ipstatus).
+and [Microsoft's native ICMP API documentation](https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho).
+
+Probe regression tests cover native response parsing, handle cleanup, ordinary
+no-response results, startup timeout recovery, and repeated helper failures:
+
+```powershell
+python -m unittest discover -s tests -p test_discovery_probe.py -v
+```
 
 ### Member 2: connectivity and statistics
 

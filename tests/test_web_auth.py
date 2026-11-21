@@ -86,7 +86,7 @@ class WebAuthTests(unittest.TestCase):
             self.assertEqual(self.request(path)[0], 404)
 
     def test_anonymous_access_denied(self):
-        for path in ("/api/session", "/api/network", "/api/admin/users"):
+        for path in ("/api/session", "/api/network", "/api/admin/users", "/api/admin/dashboard"):
             self.assertEqual(self.request(path)[0], 401)
         self.assertEqual(self.request("/api/network/scan", {})[0], 401)
 

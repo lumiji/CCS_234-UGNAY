@@ -1,13 +1,14 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const state = { mode: "login", session: null, polling: null, resetUser: null, submitting: false };
-const permissionNames = { "network.view": "View discovered devices", "network.scan": "Run network discovery", "users.manage": "Manage accounts and access" };
+const state = { mode: "login", session: null, polling: null, networkSequence: 0, resetUser: null, submitting: false };
+const permissionNames = { "dashboard.view": "View the administrator dashboard", "network.view": "View discovered devices", "network.scan": "Run network discovery", "network.test": "Run ping tests", "devices.manage": "Recognize and label devices", "users.manage": "Manage accounts and access" };
 const motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
 function syncMotion() {
   const map = document.querySelector(".network-map");
   if (motionPreference.matches) { map.setCurrentTime(0); map.pauseAnimations(); }
   else map.unpauseAnimations();
+  window.UgnayDashboard?.syncMotion();
 }
 motionPreference.addEventListener("change", syncMotion);
 syncMotion();
@@ -51,11 +52,23 @@ function modeFromHash() {
 
 function showAuth(mode = "login", focus = false) {
   state.session = null;
+  state.networkSequence += 1;
+  window.UgnayDashboard?.reset();
   clearTimeout(state.polling);
   state.mode = mode;
   state.submitting = false;
-  document.body.classList.remove("authenticated");
+  document.body.classList.remove("authenticated", "member-view");
   $("workspace").hidden = true;
+  $("member-workspace").hidden = true;
+  $("member-device-rows").replaceChildren();
+  $("member-device-count").textContent = "0";
+  $("member-local-ip").textContent = $("member-subnet").textContent = "Not detected";
+  $("member-last-scan").textContent = "No scan yet.";
+  $("member-welcome").textContent = "Your network";
+  $("member-role").textContent = $("member-session").textContent = "";
+  message("member-message");
+  $("reset-dialog").close();
+  $("reset-form").reset();
   $("auth-view").hidden = false;
   $("auth-view").className = `auth-view ${mode}`;
   $("auth-form").reset();
@@ -100,11 +113,26 @@ async function showWorkspace(session) {
   state.session = session;
   clearTimeout(state.polling);
   $("auth-view").hidden = true;
-  $("workspace").hidden = false;
+  const user = session.user, guest = user.role === "guest", admin = user.role === "admin";
+  $("workspace").hidden = !admin;
+  $("member-workspace").hidden = admin;
   document.body.classList.add("authenticated");
+  document.body.classList.toggle("member-view", !admin);
   document.title = "Your network · UGNAY";
-  const user = session.user, guest = user.role === "guest";
-  $("welcome-name").textContent = guest ? "Welcome, guest." : `Hello, ${user.username}.`;
+  if (!admin) {
+    UgnayDashboard.reset();
+    $("member-welcome").textContent = guest ? "Welcome, guest." : `Hello, ${user.username}.`;
+    $("member-role").textContent = guest ? "Guest" : "User";
+    $("member-description").textContent = guest ? "View the latest network results." : "Discover and test connections on your local network.";
+    $("member-scan").hidden = !user.permissions.includes("network.scan");
+    $("member-test-heading").hidden = !user.permissions.includes("network.test");
+    $("member-signup").hidden = !guest;
+    $("member-session").textContent = `Session expires ${new Date(session.expires_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+    message("member-message");
+    await loadNetwork();
+    return;
+  }
+  $("welcome-name").textContent = guest ? "Guest" : user.username;
   $("role-badge").textContent = user.role;
   $("account-email").textContent = user.email || "Temporary guest account";
   $("session-expiry").textContent = new Date(session.expires_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -117,32 +145,53 @@ async function showWorkspace(session) {
   $("guest-note").hidden = $("guest-signup").hidden = !guest;
   $("admin-panel").hidden = !user.permissions.includes("users.manage");
   message("workspace-message"); message("admin-message");
+  UgnayDashboard.mount({ session, api, loadUsers, refresh: async () => { clearTimeout(state.polling); await loadNetwork(); } });
   await Promise.all([loadNetwork(), user.permissions.includes("users.manage") ? loadUsers() : Promise.resolve()]);
 }
 
 async function loadNetwork() {
   const session = state.session;
   if (!session) return;
+  clearTimeout(state.polling);
+  const request = ++state.networkSequence;
   try {
-    const network = await api("/api/network");
-    if (state.session !== session) return;
-    $("device-count").textContent = network.scanned_at ? String(network.devices.length) : "—";
-    $("network-subnet").textContent = network.network?.subnet || "Not scanned";
-    $("scan-time").textContent = network.busy ? "Discovery is running. You can leave this page open." : network.scanned_at ? `Last scan: ${new Date(network.scanned_at).toLocaleString()} · Local IP: ${network.network.local_ip}` : "No discovery scan has been run in this server session.";
-    $("scan").disabled = network.busy;
-    $("scan").textContent = network.busy ? "Scanning…" : "Scan network";
-    message("workspace-message", network.error || "");
-    $("network-empty").hidden = network.devices.length > 0;
-    $("device-table-wrap").hidden = !network.devices.length;
-    $("network-empty").querySelector("h3").textContent = network.busy ? "Looking for connections…" : network.scanned_at ? "No devices responded." : "Your network starts here.";
-    $("network-empty").querySelector("p").textContent = network.scanned_at ? "Devices that block ICMP or are asleep may not appear." : session.user.role === "guest" ? "An administrator or user can run discovery. Results will appear here." : "Run discovery to see devices that respond on your local network.";
-    $("device-rows").replaceChildren(...network.devices.map((device) => {
-      const tr = document.createElement("tr");
-      [device.ip_address, device.hostname || "Hostname unavailable", device.status].forEach((text) => { const td = document.createElement("td"); td.textContent = text; tr.append(td); });
-      return tr;
-    }));
-  } catch (error) { if (state.session === session) message("workspace-message", error.message); }
-  finally { if (state.session === session) state.polling = setTimeout(loadNetwork, 2500); }
+    const admin = session.user.role === "admin";
+    const network = await api(admin ? "/api/admin/dashboard" : "/api/network");
+    if (state.session !== session || request !== state.networkSequence) return;
+    if (admin) UgnayDashboard.render(network); else renderMemberNetwork(network);
+  } catch (error) { if (state.session === session) message(session.user.role === "admin" ? "workspace-message" : "member-message", error.message); }
+  finally { if (state.session === session && request === state.networkSequence) state.polling = setTimeout(loadNetwork, 2500); }
+}
+
+function renderMemberNetwork(network) {
+  const canTest = state.session.user.permissions.includes("network.test");
+  $("member-local-ip").textContent = network.network?.local_ip || "Not detected";
+  $("member-subnet").textContent = network.network?.subnet || "Not detected";
+  $("member-device-count").textContent = String(network.devices.length);
+  $("member-scan").disabled = network.busy;
+  $("member-scan").textContent = network.busy && network.operation === "scan" ? "Scanning…" : "Scan network";
+  $("member-last-scan").textContent = network.scanned_at ? `Last scan: ${new Date(network.scanned_at).toLocaleString()}` : "No discovery scan has been completed.";
+  message("member-message", network.error || (network.busy ? network.operation === "ping" ? "Ping test in progress…" : "Scanning the local network…" : ""), network.busy);
+  $("member-empty").hidden = network.devices.length > 0;
+  $("member-empty").textContent = network.scanned_at ? "No devices responded to the latest scan." : "Results will appear here after a scan.";
+  $("member-device-rows").replaceChildren(...network.devices.map((device) => {
+    const row = document.createElement("tr");
+    const values = [device.hostname || "Hostname unavailable", device.ip_address, device.status,
+      device.ping?.average_latency_ms == null ? "—" : `${device.ping.average_latency_ms.toFixed(1)} ms`,
+      device.ping?.packet_loss_percent == null ? "—" : `${Number(device.ping.packet_loss_percent.toFixed(1))}%`];
+    values.forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); });
+    if (canTest) {
+      const cell = document.createElement("td"), button = document.createElement("button");
+      button.type = "button"; button.className = "secondary-button"; button.textContent = "Test connection"; button.disabled = network.busy;
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try { await api(`/api/devices/${device.id}/ping`, { count: 4 }); await loadNetwork(); }
+        catch (error) { message("member-message", error.message); button.disabled = false; }
+      });
+      cell.append(button); row.append(cell);
+    }
+    return row;
+  }));
 }
 
 async function updateUser(id, changes) {
@@ -217,16 +266,23 @@ $("forgot-password").addEventListener("click", () => $("recovery-dialog").showMo
 $("close-recovery").addEventListener("click", () => $("recovery-dialog").close());
 $("recovery-done").addEventListener("click", () => $("recovery-dialog").close());
 $("close-reset").addEventListener("click", () => $("reset-dialog").close());
-$("logout").addEventListener("click", async () => {
-  $("logout").disabled = true;
+async function logOut(button) {
+  button.disabled = true;
   try { await api("/api/logout", {}); history.replaceState(null, "", "#login"); showAuth("login", true); }
-  catch (error) { message("workspace-message", error.message); }
-  finally { $("logout").disabled = false; }
-});
+  catch (error) { message(state.session?.user.role === "admin" ? "workspace-message" : "member-message", error.message); }
+  finally { button.disabled = false; }
+}
+$("logout").addEventListener("click", () => logOut($("logout")));
+$("member-logout").addEventListener("click", () => logOut($("member-logout")));
 $("scan").addEventListener("click", async () => {
   $("scan").disabled = true;
   try { await api("/api/network/scan", {}); clearTimeout(state.polling); await loadNetwork(); }
   catch (error) { message("workspace-message", error.message); $("scan").disabled = false; }
+});
+$("member-scan").addEventListener("click", async () => {
+  $("member-scan").disabled = true;
+  try { await api("/api/network/scan", {}); await loadNetwork(); }
+  catch (error) { message("member-message", error.message); $("member-scan").disabled = false; }
 });
 $("refresh-users").addEventListener("click", loadUsers);
 $("reset-form").addEventListener("submit", async (event) => {
@@ -246,7 +302,7 @@ window.addEventListener("hashchange", async () => {
   // Signing up from a guest session explicitly ends the temporary session.
   if (state.session) {
     try { await api("/api/logout", {}); }
-    catch (error) { if (error.status !== 401) { message("workspace-message", error.message); return; } }
+    catch (error) { if (error.status !== 401) { message(state.session?.user.role === "admin" ? "workspace-message" : "member-message", error.message); return; } }
   }
   showAuth(modeFromHash(), true);
 });

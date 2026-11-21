@@ -283,10 +283,21 @@ when its address is a candidate and the probe succeeds.
 
 ### 7.2 Probe each candidate
 
-`_probe_host()` validates the IPv4 address and runs `_PROBE_QUERY` in a hidden
-PowerShell subprocess. The numeric target and timeout are supplied as JSON on
-stdin. The query calls `.NET Ping.Send()` once and returns JSON containing the
-integer status and reply address. The Ping object is disposed afterward.
+`_probe_host()` validates the IPv4 address and runs `ugnay/icmp_probe.py` in a
+hidden, isolated Python subprocess (`python -I -X utf8`). The numeric target and
+timeout are supplied as JSON on stdin. The helper calls Windows' native
+`IcmpSendEcho` through `ctypes` and returns JSON containing the integer status and
+reply address. It closes the native ICMP handle in a `finally` block. Its reply
+buffer covers both 32/64-bit reply layouts; only the fixed address/status header
+is read. It never dereferences native reply pointers. See the
+[Microsoft API reference](https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho).
+
+PowerShell is used once for network adapter detection. Starting it for each
+candidate previously created enough startup load to exceed probe deadlines.
+The replacement uses eight workers by default and a 15-second helper deadline.
+A helper process timeout triggers one fresh retry after `subprocess.run` has
+terminated/reaped the previous process. A second timeout raises an actionable
+`NetworkScanError`. Ordinary ICMP timeouts do not trigger this process retry.
 
 The process uses UTF-8 without an input byte-order mark. A zero process exit code
 only means the command executed; it does not prove that a target answered.
@@ -305,7 +316,7 @@ is:
 | Other integer statuses | Raise `NetworkScanError`, including resource/hardware and unknown errors. |
 | Missing/invalid status, malformed JSON, or invalid successful reply address | Raise `NetworkScanError`. |
 
-A process timeout, unavailable command, command execution failure, or unreadable
+A repeated process timeout, missing helper, command execution failure, or unreadable
 output also raises `NetworkScanError`. A process timeout is an execution failure,
 distinct from a normal ICMP timeout reported inside a valid response.
 
@@ -397,9 +408,9 @@ def __init__(
     self,
     *,
     interface_alias: str | None = None,
-    max_workers: int = 16,
+    max_workers: int = 8,
     icmp_timeout_ms: int = 1000,
-    process_timeout: float = 10.0,
+    process_timeout: float = 15.0,
     hostname_timeout: float = 2.0,
     max_hosts: int = 1024,
 ):
@@ -412,9 +423,9 @@ keyword-only.
 | Argument | Default | Validation and effect |
 | --- | --- | --- |
 | `interface_alias` | `None` | Automatic selection, or a nonempty literal interface name matched without case. |
-| `max_workers` | `16` | Positive integer; maximum concurrently active discovery tasks. |
+| `max_workers` | `8` | Positive integer; maximum concurrently active discovery tasks. |
 | `icmp_timeout_ms` | `1000` | Positive integer, at most `2**31 - 1`; ICMP response deadline in milliseconds. |
-| `process_timeout` | `10.0` | Positive finite seconds; at least `icmp_timeout_ms / 1000 + 1`. Includes probe process overhead. |
+| `process_timeout` | `15.0` | Positive finite seconds per helper attempt; at least `icmp_timeout_ms / 1000 + 1`. A timeout is retried once. |
 | `hostname_timeout` | `2.0` | Positive finite seconds for each resolver subprocess. |
 | `max_hosts` | `1024` | Positive integer limiting usable candidate addresses. |
 
@@ -439,7 +450,7 @@ Run this example from the repository root. It performs an actual scan:
 ```python
 from ugnay.discovery import DiscoveryService, NetworkDetectionError, NetworkScanError
 
-service = DiscoveryService(max_workers=16, icmp_timeout_ms=1000)
+service = DiscoveryService(max_workers=8, icmp_timeout_ms=1000)
 
 try:
     network = service.detect_network()
@@ -616,8 +627,8 @@ one environment, not guaranteed device counts or timing limits for other LANs.
 | Empty scan | Check that the intended subnet is selected and known devices can answer ICMP; review local isolation/routing and device sleep state. |
 | Some connected devices missing | ICMP-blocking or sleeping devices can be absent. Compare with an echo reply from the same numeric IP, rather than assuming every connected device must appear. |
 | Names missing | Inspect OS reverse-resolution configuration. The IP record remains valid for discovery when naming fails. |
-| Probe process timed out | Review process startup load and `process_timeout`; distinguish it from a valid ICMP `TimedOut` response. |
-| Scan seems slow | Progress is indeterminate. PowerShell starts for every probe, and name resolution uses worker capacity. Inspect range size and workload before adjusting concurrency/deadlines. |
+| Probe helper exceeded both deadlines | The helper has already retried once. Check interpreter execution restrictions and local load; review `process_timeout`. This differs from a valid ICMP no-response result. |
+| Scan seems slow | Progress is indeterminate. Eight lightweight native-ICMP helper/lookup tasks run by default. Nonresponding addresses and name resolution still consume time. Inspect range size and workload before adjusting concurrency/deadlines. |
 | Previous devices remain after an error | This is expected: they are the earlier successful snapshot. Check the failure status and unchanged last-scan time. |
 | `Not tested` appears for responders | This describes Module 2 measurements. Discovery leaves `Device.result=None`. |
 | Test commands fail or discover zero tests | Confirm the test files exist; they are absent in the reviewed working tree. Restore the maintained suite before claiming automated verification. |

@@ -6,8 +6,10 @@
   <meta name="theme-color" content="#15283e">
   <meta name="description" content="UGNAY Network Health Checker. Every connection. In view.">
   <title>Login · UGNAY</title>
-  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/logo_dark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -95,24 +97,69 @@
     <a class="guest-link" id="guest-link" href="#guest">Continue as guest <span class="guest-link-detail">· View only</span></a>
   </main>
 
-  <main class="workspace" id="workspace" hidden>
-    <div class="workspace-header">
-      <div><p class="eyebrow">YOUR NETWORK, IN VIEW</p><h1 id="welcome-name">Welcome back.</h1></div>
-      <div class="account-actions"><span class="role-badge" id="role-badge"></span><button class="secondary-button" id="logout" type="button">Log out</button></div>
-    </div>
-    <div class="workspace-grid">
-      <section class="workspace-card network-panel" aria-labelledby="network-title">
-        <div class="section-heading"><div><p class="eyebrow">NETWORK OVERVIEW</p><h2 id="network-title">Every connection.</h2></div><button class="primary-button" id="scan" type="button">Scan network</button></div>
-        <p class="muted" id="access-description"></p>
-        <p id="workspace-message" class="form-message" role="status" hidden></p>
-        <div class="network-metrics"><div><span class="metric-label">Devices discovered</span><strong id="device-count">—</strong></div><div><span class="metric-label">Network range</span><strong class="metric-subnet" id="network-subnet">Not scanned</strong></div></div>
-        <p class="muted scan-time" id="scan-time">No discovery scan has been run in this server session.</p>
-        <div id="network-empty" class="empty-state"><img src="/assets/network-placeholder.svg" width="52" height="52" alt=""><h3>Your network starts here.</h3><p>Run discovery to see devices that respond on your local network.</p></div>
-        <div class="table-scroll" id="device-table-wrap" hidden><table><caption class="sr-only">Discovered devices</caption><thead><tr><th>IP address</th><th>Hostname</th><th>Status</th></tr></thead><tbody id="device-rows"></tbody></table></div>
+  <main class="workspace" id="workspace" aria-label="Administrator dashboard" hidden>
+    <aside class="app-sidebar" aria-label="Main navigation">
+      <nav class="sidebar-nav">
+        <button type="button" data-view="dashboard" class="nav-item active" aria-current="page">Dashboard</button>
+        <button type="button" data-view="devices" class="nav-item">Devices</button>
+        <button type="button" data-view="map" class="nav-item">Network Map</button>
+        <button type="button" data-view="tests" class="nav-item">Tests</button>
+        <button type="button" data-view="history" class="nav-item">History</button>
+        <button type="button" data-view="reports" class="nav-item">Reports</button>
+        <button type="button" data-view="security" class="nav-item">Security</button>
+        <button type="button" data-view="access" class="nav-item" id="access-nav" hidden>Access</button>
+        <button type="button" data-view="settings" class="nav-item">Settings</button>
+      </nav>
+      <div class="sidebar-account">
+        <button id="account-menu-toggle" class="account-menu-toggle" type="button" aria-expanded="false" aria-controls="account-menu"><span class="account-avatar" id="account-initials">U</span><span><strong id="welcome-name">Your account</strong><span id="role-badge">User</span></span><span class="account-chevron" aria-hidden="true">⌄</span></button>
+        <div id="account-menu" class="account-menu" hidden><p id="account-menu-email"></p><button class="secondary-button" type="button" id="logout">Log out</button></div>
+      </div>
+    </aside>
+
+    <div class="dashboard-content">
+      <section class="summary-bar" aria-label="Network measurements">
+        <div><span>Local IP Address</span><strong id="local-ip">Not detected</strong></div>
+        <div><span>Network Range</span><strong id="network-subnet">Not detected</strong></div>
+        <div><span>Devices Detected</span><strong id="device-count">0</strong></div>
+        <div><span>Last Scan</span><strong id="last-scan">Never</strong></div>
+        <button class="primary-button" id="scan" type="button">Scan network</button>
       </section>
-      <aside class="workspace-card access-panel" aria-labelledby="access-title"><p class="eyebrow">YOUR ACCESS</p><h2 id="access-title">Connected with care.</h2><p class="muted" id="account-email"></p><ul id="permissions-list" class="permissions-list"></ul><div class="session-note"><span>Session expires</span><strong id="session-expiry"></strong></div><p class="muted guest-note" id="guest-note" hidden>Guest access lasts up to two hours. Create an account to run network discovery.</p><a href="#signup" id="guest-signup" hidden>Create an account</a></aside>
-      <section class="workspace-card admin-panel" id="admin-panel" aria-labelledby="admin-title" hidden><div class="section-heading"><div><p class="eyebrow">ADMINISTRATION</p><h2 id="admin-title">Account access</h2></div><button class="secondary-button" id="refresh-users" type="button">Refresh accounts</button></div><p class="muted">Role, status, and password changes revoke the account’s existing sessions.</p><p id="admin-message" class="form-message" role="status" hidden></p><div class="table-scroll"><table><caption class="sr-only">Account management</caption><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="user-rows"></tbody></table></div></section>
+      <p id="workspace-message" class="form-message" role="status" hidden></p>
+      <p id="access-description" class="sr-only"></p>
+
+      <section class="map-stage" id="map-stage" aria-label="Interactive network map">
+        <svg id="device-network-map" viewBox="0 0 1000 430" role="group" aria-labelledby="map-title map-description"><title id="map-title">Discovered network</title><desc id="map-description">Devices are linked to the subnet where discovery found them. Hover or select a device for its profile. Drag to pan; use the zoom controls to explore.</desc><g id="map-graph"></g></svg>
+        <div id="network-empty" class="map-empty"><img src="/assets/network-placeholder.svg" width="58" height="58" alt=""><h2>Every connection. In view.</h2><p>Scan your network to discover responding devices.</p></div>
+        <div class="map-toolbar"><div class="map-zoom" aria-label="Map controls"><button id="map-zoom-in" type="button" aria-label="Zoom in">+</button><button id="map-zoom-out" type="button" aria-label="Zoom out">−</button><button id="map-fit" type="button">Fit</button></div><span class="map-legend"><span class="trust-dot trusted">✓</span> Trusted <span class="trust-dot review">!</span> Review <span class="trust-dot flagged">×</span> Flagged</span><div class="map-zoom" id="map-pager" hidden><button id="map-prev" type="button" hidden>Previous</button><span id="map-page"></span><button id="map-next" type="button" hidden>Next</button></div></div>
+        <p class="map-disclosure" id="map-disclosure">Subnet membership · Physical links are not detected</p>
+      </section>
+
+      <section class="device-board" id="device-board" aria-label="Devices and recent activity">
+        <button class="board-toggle" id="board-toggle" type="button" aria-expanded="true" aria-controls="board-body">Hide</button>
+        <div class="board-body" id="board-body">
+          <div class="devices-column"><div class="board-metrics"><div><span>Latest Average Latency</span><strong id="average-latency">—</strong></div><div><span>Latest Packet Loss</span><strong id="packet-loss">—</strong></div><button class="primary-button" id="view-reports" type="button">View Reports</button></div>
+            <div class="devices-heading"><div><h2>Detected Devices</h2><p id="scan-time">Select a device to see its latest test.</p></div><label class="sr-only" for="device-search">Search devices</label><input id="device-search" type="search" placeholder="Find a device" autocomplete="off"></div>
+            <div class="table-scroll"><table class="detected-table"><caption class="sr-only">Devices in the latest scan</caption><thead><tr><th>Hostname</th><th>IP address</th><th>Trust</th><th>Ping Response</th></tr></thead><tbody id="device-rows"></tbody></table></div><p id="devices-empty" class="muted board-empty">No devices yet. Start a network scan.</p>
+          </div>
+          <section class="activity-column" aria-labelledby="activity-title"><h2 id="activity-title">Recent Activity</h2><ol id="activity-list" class="activity-list"></ol><p id="activity-empty" class="muted">Your network activity will appear here.</p></section>
+        </div>
+      </section>
+
+      <section id="tests-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">CONNECTIVITY</p><h1>Ping tests</h1><p class="muted">Measure the response time and packet loss of a device from your latest scan.</p><form id="test-form" class="test-controls"><label for="test-device">Device<select id="test-device" required></select></label><label for="test-count">Requests<select id="test-count"><option value="4">4 requests</option><option value="10">10 requests</option><option value="20">20 requests</option></select></label><button class="primary-button" id="run-test" type="submit">Run ping test</button></form><p id="test-message" class="form-message" role="status" hidden></p><div id="test-result"></div></section>
+      <section id="history-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">NETWORK HISTORY</p><h1>Every scan, recorded.</h1><p class="muted">Completed discovery scans are saved locally. Failed scans preserve the previous results.</p><div class="table-scroll"><table><caption class="sr-only">Scan history</caption><thead><tr><th>Completed</th><th>Network range</th><th>Devices</th></tr></thead><tbody id="scan-history-rows"></tbody></table></div><h2 class="history-activity-heading">Recent activity</h2><ol id="history-activity" class="activity-list"></ol></section>
+      <section id="reports-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">LATEST SCAN SNAPSHOT</p><h1>Your network report.</h1><p class="muted">A summary of the latest discovery scan and the latest measured ping results for its devices.</p><div id="report-summary" class="report-summary"></div><button class="primary-button" id="download-report" type="button">Download report</button><p class="muted report-footnote">Trust is an administrator decision. A successful ping does not establish that a device is safe.</p></section>
+      <section id="security-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">DEVICE RECOGNITION</p><h1>Know your connections.</h1><p class="muted">New devices start in Review. Select a device to view its profile and, as an administrator, update its trust status.</p><div id="trust-summary" class="trust-summary"></div><p class="identity-note">Recognition is saved by subnet and IP address. DHCP can assign an address to a different device; confirm its identity before trusting it. These labels do not block network traffic.</p><div id="security-devices" class="security-devices"></div></section>
+      <section class="workspace-card admin-panel detail-panel" id="admin-panel" aria-labelledby="admin-title" hidden><div class="section-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1 id="admin-title">Account access</h1></div><button class="secondary-button" id="refresh-users" type="button">Refresh accounts</button></div><p class="muted">Role, status, and password changes revoke the account’s existing sessions.</p><p id="admin-message" class="form-message" role="status" hidden></p><div class="table-scroll"><table><caption class="sr-only">Account management</caption><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="user-rows"></tbody></table></div></section>
+      <section class="workspace-card access-panel detail-panel" id="settings-panel" aria-labelledby="access-title" hidden><p class="eyebrow">SETTINGS &amp; YOUR ACCESS</p><h1 id="access-title">Make yourself at home.</h1><p class="muted" id="account-email"></p><label class="motion-setting"><input id="motion-enabled" type="checkbox"> Animate the background and network map</label><p class="muted">Your system’s reduced-motion preference takes priority.</p><ul id="permissions-list" class="permissions-list"></ul><div class="session-note"><span>Session expires</span><strong id="session-expiry"></strong></div><p class="muted guest-note" id="guest-note" hidden>Guest access lasts up to two hours. Create an account to run discovery and ping tests.</p><a href="#signup" id="guest-signup" hidden>Create an account</a></section>
     </div>
+
+    <aside id="device-profile" class="device-profile" aria-labelledby="profile-name" hidden><button class="dialog-close" id="close-profile" type="button" aria-label="Close device profile">×</button><p class="eyebrow">DEVICE PROFILE</p><div id="profile-avatar" class="profile-avatar"></div><h2 id="profile-name"></h2><p id="profile-ip" class="profile-ip"></p><span id="profile-trust" class="trust-badge"></span><dl id="profile-facts"></dl><form id="device-edit-form"><label for="device-label">Device name<input id="device-label" maxlength="64" placeholder="Add a recognizable name"></label><label for="device-trust">Trust status<select id="device-trust"><option value="review">Review · New or unrecognized</option><option value="trusted">Trusted · Recognized by admin</option><option value="flagged">Flagged · Needs attention</option></select></label><button class="primary-button" type="submit" id="save-device">Save changes</button></form><button id="profile-test" class="secondary-button" type="button">Test connection · 4 requests</button><p id="profile-message" class="form-message" role="status" hidden></p><p class="profile-hint">Select a node to keep its profile open.</p></aside>
+  </main>
+
+  <main class="member-workspace" id="member-workspace" hidden>
+    <header class="member-header"><div><p class="eyebrow">EVERY CONNECTION. IN VIEW.</p><h1 id="member-welcome">Your network</h1><p id="member-description"></p></div><div class="member-actions"><span class="role-badge" id="member-role"></span><button id="member-logout" class="secondary-button" type="button">Log out</button></div></header>
+    <section class="workspace-card" aria-labelledby="member-network-title"><div class="section-heading"><h2 id="member-network-title">Network overview</h2><button class="primary-button" id="member-scan" type="button">Scan network</button></div><p id="member-message" class="form-message" role="status" hidden></p><div class="network-metrics member-metrics"><div><span class="metric-label">Local IP address</span><strong class="metric-subnet" id="member-local-ip">Not detected</strong></div><div><span class="metric-label">Network range</span><strong class="metric-subnet" id="member-subnet">Not detected</strong></div><div><span class="metric-label">Devices discovered</span><strong id="member-device-count">0</strong></div></div><p class="muted" id="member-last-scan">No scan yet.</p><div class="table-scroll"><table class="member-device-table"><caption class="sr-only">Latest discovered devices and ping results</caption><thead><tr><th>Hostname</th><th>IP address</th><th>Ping status</th><th>Average latency</th><th>Packet loss</th><th id="member-test-heading">Test</th></tr></thead><tbody id="member-device-rows"></tbody></table></div><p class="muted" id="member-empty">No devices yet.</p></section>
+    <p class="member-session" id="member-session"></p><a id="member-signup" href="#signup" hidden>Create an account to scan and test connections</a>
   </main>
 
   <dialog id="recovery-dialog" aria-labelledby="recovery-title"><button class="dialog-close" id="close-recovery" type="button" aria-label="Close dialog">×</button><p class="eyebrow">ACCOUNT RECOVERY</p><h2 id="recovery-title">Let’s get you back in.</h2><p>Ask your UGNAY administrator to reset your password. They can do this from Account access.</p><p class="muted">If you manage this installation, use the password recovery command documented in the project README.</p><button class="primary-button" id="recovery-done" type="button">Got it</button></dialog>

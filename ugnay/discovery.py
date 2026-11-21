@@ -3,6 +3,7 @@ from datetime import datetime
 from ipaddress import IPv4Address, IPv4Interface, ip_address, ip_network
 import json
 from math import isfinite
+from pathlib import Path
 import subprocess
 import sys
 
@@ -41,27 +42,9 @@ $records = @(foreach ($config in (Get-NetIPConfiguration -All)) {
 ConvertTo-Json -InputObject $records -Compress
 """
 
-# Ping the requested IP with the given timeout 
-# and return the status and reply address as JSON.
-_PROBE_QUERY = r"""
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$request = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$ping = [System.Net.NetworkInformation.Ping]::new()
-try {
-    $reply = $ping.Send([System.Net.IPAddress]::Parse($request.IPAddress),
-                        [int]$request.TimeoutMs)
-    [PSCustomObject]@{
-        Status = [int]$reply.Status
-        Address = [string]$reply.Address
-    } | ConvertTo-Json -Compress
-}
-finally {
-    $ping.Dispose()
-}
-"""
+# A lightweight interpreter calls Windows' native ICMP API. The file is run in
+# isolation so an OS/backend stall still has a killable process deadline.
+_PROBE_HELPER = Path(__file__).with_name("icmp_probe.py").resolve()
 
 # Isolate the OS resolver so a slow reverse lookup can be killed at its deadline.
 # A Future timeout or socket.setdefaulttimeout() cannot bound gethostbyaddr().
@@ -103,8 +86,8 @@ class NetworkScanError(RuntimeError):
 # Detect the local IPv4 subnet on Windows and 
 # find devices that respond to ping in the requested range.
 class DiscoveryService:
-    def __init__(self, *, interface_alias: str | None = None, max_workers: int = 16,
-                 icmp_timeout_ms: int = 1000, process_timeout: float = 10.0,
+    def __init__(self, *, interface_alias: str | None = None, max_workers: int = 8,
+                 icmp_timeout_ms: int = 1000, process_timeout: float = 15.0,
                  hostname_timeout: float = 2.0, max_hosts: int = 1024):
         if interface_alias is not None and (
             not isinstance(interface_alias, str) or not interface_alias.strip()
@@ -290,27 +273,34 @@ class DiscoveryService:
         address = str(IPv4Address(ip_address))
         if sys.platform != "win32":
             raise NetworkScanError("Device discovery currently supports Windows only.")
-        try:
-            completed = subprocess.run(
-                ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-                 "-Command", _PROBE_QUERY],
-                input=json.dumps({"IPAddress": address, "TimeoutMs": self.icmp_timeout_ms}),
-                capture_output=True,
-                encoding="utf-8",
-                check=True,
-                timeout=self.process_timeout,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise NetworkScanError(f"The ICMP probe process for {address} timed out.") from error
-        except subprocess.CalledProcessError as error:
-            detail = (error.stderr or "").strip().splitlines()
-            message = f"Windows could not execute the ICMP probe for {address}"
-            if detail:
-                message += f": {detail[0]}"
-            raise NetworkScanError(message) from error
-        except (OSError, UnicodeError) as error:
-            raise NetworkScanError(f"Could not run the ICMP probe for {address}: {error}") from error
+        for attempt in range(2):
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-I", "-X", "utf8", str(_PROBE_HELPER)],
+                    input=json.dumps({"IPAddress": address, "TimeoutMs": self.icmp_timeout_ms}),
+                    capture_output=True,
+                    encoding="utf-8",
+                    check=True,
+                    timeout=self.process_timeout,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                break
+            except subprocess.TimeoutExpired as error:
+                # subprocess.run kills/reaps the old helper before a fresh retry.
+                # Do not turn an execution failure into a nonresponding device.
+                if attempt:
+                    raise NetworkScanError(
+                        f"The ICMP probe helper for {address} exceeded {self.process_timeout:g}s "
+                        "on both attempts. Check local system load or application restrictions."
+                    ) from error
+            except subprocess.CalledProcessError as error:
+                detail = (error.stderr or "").strip().splitlines()
+                message = f"Windows could not execute the ICMP probe for {address}"
+                if detail:
+                    message += f": {detail[0]}"
+                raise NetworkScanError(message) from error
+            except (OSError, UnicodeError) as error:
+                raise NetworkScanError(f"Could not run the ICMP probe for {address}: {error}") from error
 
         try:
             reply = json.loads(completed.stdout)

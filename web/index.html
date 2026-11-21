@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15283e">
+  <meta name="description" content="UGNAY Network Health Checker. Every connection. In view.">
+  <title>Login · UGNAY</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="scene" aria-hidden="true">
+    <!-- Replace the optional backdrop placeholder in web/assets when ready. -->
+    <div class="backdrop-placeholder"></div>
+    <div class="ambient ambient-blue"></div>
+    <div class="ambient ambient-green"></div>
+    <div class="ambient ambient-pink"></div>
+    <div class="frame-line frame-vertical"></div>
+    <div class="frame-line frame-top"></div>
+    <div class="frame-line frame-bottom"></div>
+    <svg class="network-map" viewBox="0 0 1440 1024" preserveAspectRatio="xMidYMid slice" fill="none">
+      <defs>
+        <path id="blue-orbit" d="M1211 240.3 A355 319 0 1 1 839 783.7 A355 319 0 1 1 1211 240.3Z"/>
+        <path id="green-orbit" d="M1181 512 A256 256 0 1 1 669 512 A256 256 0 1 1 1181 512Z"/>
+        <path id="pink-orbit" d="M1244 889 A465 388 0 1 1 1024 135 A465 388 0 1 1 1244 889Z"/>
+        <path id="inner-orbit" d="M833 346 A164 161 0 1 1 833 668 A164 161 0 1 1 833 346Z"/>
+      </defs>
+      <path class="map-axis" d="M669 513H1600"/>
+      <g class="network-tracks">
+        <ellipse class="track track-muted" cx="1300" cy="512" rx="631" ry="520"/>
+        <ellipse class="track track-muted" cx="1214" cy="512" rx="545" ry="452"/>
+        <use class="track track-pink" href="#pink-orbit"/>
+        <use class="track track-blue" href="#blue-orbit"/>
+        <use class="track track-green" href="#green-orbit"/>
+        <use class="track track-red" href="#inner-orbit"/>
+        <circle class="satellite" r="16.5" fill="#a0d0df"><animateMotion dur="125s" repeatCount="indefinite"><mpath href="#blue-orbit"/></animateMotion></circle>
+        <circle class="satellite" r="17" fill="#a8df82"><animateMotion dur="95s" repeatCount="indefinite"><mpath href="#green-orbit"/></animateMotion></circle>
+        <circle class="satellite" r="16.5" fill="#af245b"><animateMotion dur="155s" repeatCount="indefinite"><mpath href="#pink-orbit"/></animateMotion></circle>
+        <circle class="satellite" r="6" fill="#c32661"><animateMotion dur="75s" repeatCount="indefinite"><mpath href="#inner-orbit"/></animateMotion></circle>
+      </g>
+    </svg>
+  </div>
+
+  <header class="brand">
+    <!-- Public image files are served from web/assets/. -->
+    <img class="brand-mark" src="/assets/logo.svg" alt="" width="66" height="62">
+    <div><span class="brand-name">UGNAY</span><span class="brand-caption">Network Health Checker</span></div>
+  </header>
+
+  <p class="tagline">Every<br>connection.<br>In view.</p>
+
+  <main id="auth-view" class="auth-view">
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="auth-heading">
+        <h1 id="auth-title">WELCOME BACK!</h1>
+        <p id="auth-description">Log in to your account.</p>
+      </div>
+      <form id="auth-form">
+        <div class="fields">
+          <div class="field">
+            <label for="username"><img src="/assets/user-placeholder.svg" alt="" class="field-icon"><span id="username-label">Username/email</span></label>
+            <input id="username" name="username" autocomplete="username" placeholder="Enter your username or email" maxlength="254" required>
+          </div>
+          <div class="field" id="email-field" hidden>
+            <label for="email"><img src="/assets/email-placeholder.svg" alt="" class="field-icon">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="Enter your email" maxlength="254" disabled>
+          </div>
+          <div class="field">
+            <label for="password"><img src="/assets/lock-placeholder.svg" alt="" class="field-icon">Password</label>
+            <div class="password-input">
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" maxlength="128" required>
+              <button class="password-toggle" type="button" data-target="password" aria-label="Show password" aria-pressed="false"><img src="/assets/eye-placeholder.svg" alt=""></button>
+            </div>
+          </div>
+          <div class="field" id="confirm-field" hidden>
+            <label for="confirm-password">Confirm Password</label>
+            <div class="password-input">
+              <input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" placeholder="Enter your password" maxlength="128" disabled>
+              <button class="password-toggle" type="button" data-target="confirm-password" aria-label="Show confirmation password" aria-pressed="false"><img src="/assets/eye-placeholder.svg" alt=""></button>
+            </div>
+          </div>
+        </div>
+        <p id="field-help" class="field-help" hidden></p>
+        <div class="form-options">
+          <label class="remember"><input id="remember" type="checkbox" name="remember"> <span>Remember me</span></label>
+          <button class="text-button" id="forgot-password" type="button">Forgot password?</button>
+        </div>
+        <p class="form-message" id="auth-message" role="alert" hidden></p>
+        <button type="submit" class="primary-button auth-submit" id="auth-submit">Login</button>
+      </form>
+      <p class="auth-footer"><span id="footer-caption">Don’t have an account?</span> <a id="footer-link" href="#signup">Sign up</a></p>
+    </section>
+    <a class="guest-link" id="guest-link" href="#guest">Continue as guest <span class="guest-link-detail">· View only</span></a>
+  </main>
+
+  <main class="workspace" id="workspace" hidden>
+    <div class="workspace-header">
+      <div><p class="eyebrow">YOUR NETWORK, IN VIEW</p><h1 id="welcome-name">Welcome back.</h1></div>
+      <div class="account-actions"><span class="role-badge" id="role-badge"></span><button class="secondary-button" id="logout" type="button">Log out</button></div>
+    </div>
+    <div class="workspace-grid">
+      <section class="workspace-card network-panel" aria-labelledby="network-title">
+        <div class="section-heading"><div><p class="eyebrow">NETWORK OVERVIEW</p><h2 id="network-title">Every connection.</h2></div><button class="primary-button" id="scan" type="button">Scan network</button></div>
+        <p class="muted" id="access-description"></p>
+        <p id="workspace-message" class="form-message" role="status" hidden></p>
+        <div class="network-metrics"><div><span class="metric-label">Devices discovered</span><strong id="device-count">—</strong></div><div><span class="metric-label">Network range</span><strong class="metric-subnet" id="network-subnet">Not scanned</strong></div></div>
+        <p class="muted scan-time" id="scan-time">No discovery scan has been run in this server session.</p>
+        <div id="network-empty" class="empty-state"><img src="/assets/network-placeholder.svg" width="52" height="52" alt=""><h3>Your network starts here.</h3><p>Run discovery to see devices that respond on your local network.</p></div>
+        <div class="table-scroll" id="device-table-wrap" hidden><table><caption class="sr-only">Discovered devices</caption><thead><tr><th>IP address</th><th>Hostname</th><th>Status</th></tr></thead><tbody id="device-rows"></tbody></table></div>
+      </section>
+      <aside class="workspace-card access-panel" aria-labelledby="access-title"><p class="eyebrow">YOUR ACCESS</p><h2 id="access-title">Connected with care.</h2><p class="muted" id="account-email"></p><ul id="permissions-list" class="permissions-list"></ul><div class="session-note"><span>Session expires</span><strong id="session-expiry"></strong></div><p class="muted guest-note" id="guest-note" hidden>Guest access lasts up to two hours. Create an account to run network discovery.</p><a href="#signup" id="guest-signup" hidden>Create an account</a></aside>
+      <section class="workspace-card admin-panel" id="admin-panel" aria-labelledby="admin-title" hidden><div class="section-heading"><div><p class="eyebrow">ADMINISTRATION</p><h2 id="admin-title">Account access</h2></div><button class="secondary-button" id="refresh-users" type="button">Refresh accounts</button></div><p class="muted">Role, status, and password changes revoke the account’s existing sessions.</p><p id="admin-message" class="form-message" role="status" hidden></p><div class="table-scroll"><table><caption class="sr-only">Account management</caption><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="user-rows"></tbody></table></div></section>
+    </div>
+  </main>
+
+  <dialog id="recovery-dialog" aria-labelledby="recovery-title"><button class="dialog-close" id="close-recovery" type="button" aria-label="Close dialog">×</button><p class="eyebrow">ACCOUNT RECOVERY</p><h2 id="recovery-title">Let’s get you back in.</h2><p>Ask your UGNAY administrator to reset your password. They can do this from Account access.</p><p class="muted">If you manage this installation, use the password recovery command documented in the project README.</p><button class="primary-button" id="recovery-done" type="button">Got it</button></dialog>
+  <dialog id="reset-dialog" aria-labelledby="reset-title"><button class="dialog-close" id="close-reset" type="button" aria-label="Close dialog">×</button><h2 id="reset-title">Reset account password</h2><form id="reset-form"><label for="reset-password">New password</label><input type="password" id="reset-password" autocomplete="new-password" minlength="12" maxlength="128" placeholder="At least 12 characters" required><label for="reset-confirm">Confirm password</label><input type="password" id="reset-confirm" autocomplete="new-password" minlength="12" maxlength="128" required><p id="reset-message" class="form-message" role="alert" hidden></p><button class="primary-button" type="submit">Reset password</button></form></dialog>
+</body>
+</html>

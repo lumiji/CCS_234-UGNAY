@@ -10,37 +10,9 @@ import sys
 from .models import Device, DiscoveryResult, NetworkInfo
 
 
-# Query Windows for IPv4 addresses and subnet prefixes on active
-#  non-loopback adapters as JSON.
-_NETWORK_QUERY = r"""
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$records = @(foreach ($config in (Get-NetIPConfiguration -All)) {
-    $adapter = $config.NetAdapter
-    if ($null -eq $adapter -or $adapter.Status -ne 'Up' -or
-        $adapter.InterfaceType -eq 24 -or -not $config.IPv4Address) {
-        continue
-    }
-    $addresses = Get-NetIPAddress -InterfaceIndex $config.InterfaceIndex `
-        -AddressFamily IPv4 -PolicyStore ActiveStore
-    foreach ($address in $addresses) {
-        [PSCustomObject]@{
-            InterfaceAlias = [string]$config.InterfaceAlias
-            InterfaceIndex = [int]$config.InterfaceIndex
-            InterfaceType = [int]$adapter.InterfaceType
-            HardwareInterface = [bool]$adapter.HardwareInterface
-            Status = [string]$adapter.Status
-            InterfaceMetric = [int]$config.NetIPv4Interface.InterfaceMetric
-            IPAddress = [string]$address.IPAddress
-            PrefixLength = [int]$address.PrefixLength
-            AddressState = [string]$address.AddressState
-            SkipAsSource = [bool]$address.SkipAsSource
-        }
-    }
-})
-ConvertTo-Json -InputObject $records -Compress
-"""
+# Read adapter metadata with the native IP Helper API, bypassing slow or
+# restricted PowerShell/CIM providers. Isolation keeps an OS stall killable.
+_NETWORK_HELPER = Path(__file__).with_name("windows_network.py").resolve()
 
 # A lightweight interpreter calls Windows' native ICMP API. The file is run in
 # isolation so an OS/backend stall still has a killable process deadline.
@@ -128,18 +100,15 @@ class DiscoveryService:
 
         try:
             completed = subprocess.run(
-                ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-                 "-Command", _NETWORK_QUERY],
+                [sys.executable, "-I", "-X", "utf8", str(_NETWORK_HELPER)],
                 capture_output=True,
-                encoding="utf-8-sig",
+                encoding="utf-8",
                 check=True,
                 timeout=60,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-        except FileNotFoundError as error:
-            raise NetworkDetectionError("Windows PowerShell (powershell.exe) was not found.") from error
         except subprocess.TimeoutExpired as error:
-            raise NetworkDetectionError("Reading Windows network configuration timed out.") from error
+            raise NetworkDetectionError("The native Windows network configuration helper timed out. Try scanning again.") from error
         except subprocess.CalledProcessError as error:
             detail = (error.stderr or "").strip().splitlines()
             message = "Windows could not read network configuration"
@@ -149,17 +118,16 @@ class DiscoveryService:
         except OSError as error:
             raise NetworkDetectionError(f"Could not start Windows network detection: {error}") from error
         except UnicodeError as error:
-            raise NetworkDetectionError("PowerShell returned unreadable network configuration.") from error
+            raise NetworkDetectionError("Windows returned unreadable network configuration.") from error
 
         try:
             records = json.loads(completed.stdout)
         except (ValueError, TypeError) as error:
-            raise NetworkDetectionError("PowerShell returned invalid network configuration JSON.") from error
-        # Accept a single object as well as an array from ConvertTo-Json.
+            raise NetworkDetectionError("Windows returned invalid network configuration JSON.") from error
         if isinstance(records, dict):
             records = [records]
         if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
-            raise NetworkDetectionError("PowerShell returned an unexpected network configuration format.")
+            raise NetworkDetectionError("Windows returned an unexpected network configuration format.")
 
         candidates = []
         for row in records:
@@ -196,7 +164,7 @@ class DiscoveryService:
                 priority = (not physical_lan, address.is_link_local, metric, index, int(address))
                 candidates.append((priority, NetworkInfo(str(address), str(interface.network))))
             except (KeyError, ValueError, TypeError) as error:
-                raise NetworkDetectionError("PowerShell returned invalid IPv4 interface data.") from error
+                raise NetworkDetectionError("Windows returned invalid IPv4 interface data.") from error
 
         if not candidates:
             if self.interface_alias is not None:

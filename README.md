@@ -88,22 +88,56 @@ rendered administrator data from the page before another account can sign in.
 
 ### Dashboard and device recognition
 
-- Hover or focus a map node to preview its profile. Select it to keep the profile
-  open; Escape or the close button dismisses it. Names, IPs, and trust indicators
-  are visible on nodes. Selecting a table row opens the same profile.
-- Drag the map to pan. Use +/minus/Fit to zoom, or Ctrl+mouse wheel. Larger scans
+- The Dashboard is a read-only overview. Scan network and View Reports are its
+  action buttons. The map includes a trust legend, zoom in/out, and Fit controls
+  in its upper-right corner. Hide collapses the device list and activity feed while keeping
+  latency, packet loss, and View Reports visible; Show restores the details.
+  The map viewport extends to the dashboard's bottom behind the lower board, so
+  zoomed nodes remain visible in the space revealed when the board is hidden.
+- Select a map node or device row to open a compact profile popup. Escape, the
+  close button, or a click outside dismisses it. The central network node opens
+  subnet details. Dashboard profiles have no editing or ping controls.
+- In Dashboard or Network Map, use +/minus/Fit to zoom, or Ctrl+mouse wheel.
+  Zoom in on the Dashboard, then drag the map to pan with a mouse or touch.
+  Network Map also supports dragging. Fit restores the original position and zoom.
+  Larger scans
   use map pages (eight devices per page on desktop, four on mobile) to keep labels
-  readable. Search filters the full device list and map.
+  readable. The Devices tab provides search and the full list; the Dashboard
+  previews up to four devices.
+- Network Map dedicates the main area to the map without a sliding device/activity
+  board. Clicking a device still opens its profile popup. The bottom action bar
+  shows the selected device's icon, name, trust, hostname, IP, and available MAC
+  address. Missing MAC information is shown as unavailable. The bar's Open Device
+  button opens the same device in the Devices tab, or the
+  first detected device when none has been selected. It is disabled before devices
+  are detected. Dashboard panel visibility is preserved when switching tabs.
+- Devices provides a scrollable list with search and All/Trusted/Review/Flagged
+  filters. Selecting a device updates its inline profile, editable name and trust,
+  measured ping results, and device-specific recent activity. Run ping test sends
+  four requests to the selected device. The Reply Latency graph compares its latest
+  three saved tests by request number, leaving gaps for timeouts. Untested devices
+  show an empty graph until a test runs. Background refreshes preserve unsaved edits.
+- Device details include detected hostname, subnet, IP, first discovery, last scan
+  response, and latest ping metrics. Device type and MAC address are marked as
+  unavailable when discovery has not identified them. The device history endpoint
+  returns up to 20 activities and three tests for that device, independently of
+  the global dashboard feed.
 - Check means Trusted, warning means Review, and x means Flagged. Every newly
   discovered device starts in Review. Administrators can edit its label and trust
-  in its profile. These decisions persist across rescans and restarts.
+  in profiles opened from Devices or Security. These decisions persist across
+  rescans and restarts.
 - Recognition is keyed by subnet and IP, because the discovery service does not
   collect MAC addresses or hardware identity. DHCP address reuse can represent a
   different device. Trust labels do not configure a firewall or block traffic.
 - Map lines show membership in the scanned subnet. ICMP discovery does not reveal
   physical switch, router, Wi-Fi attachment, or device-to-device topology. The
   central node represents the local subnet, without inventing physical links.
-- Use Test connection in a profile, or the Tests screen with 4, 10, or 20 requests.
+- Use Test connection in a profile outside the Dashboard, or the Tests screen
+  with 4, 10, or 20 requests. Tests also offers a per-request timeout of 1, 2,
+  or 5 seconds, defaulting to 2 seconds. Existing profile tests retain a
+  1-second timeout. The Tests screen shows individual response pills, a line
+  chart comparing the selected device's latest three tests, and measured sent,
+  received, loss, average, and maximum values. Timeout replies leave chart gaps.
   This calls the desktop `ConnectivityService.test_connection()` implementation.
   Ping metrics stay blank until an actual test completes. Latest Average Latency
   and Packet Loss aggregate the latest saved replies for currently detected
@@ -113,8 +147,21 @@ rendered administrator data from the page before another account can sign in.
   The browser polls for updates without blocking. Failures restore controls and
   retain the last successful results. No-response devices may be asleep or block
   ICMP; absence from a scan does not prove disconnection.
-- History shows saved scan timestamps/counts and recent activity. Reports shows
-  the latest snapshot and downloads a plain-text report from measured data.
+- History shows saved scan timestamps/counts and recent activity. Reports offers
+  device and scan selectors, measured summary cards, a reply-latency line chart,
+  reply/timeout counts, device information, and individual packet results. Select
+  from the latest 30 saved scans, including devices absent from the current scan.
+  Tests belong to the interval from the selected scan until the next scan; device
+  details use current saved values. Charts compare up to three tests, while the
+  packet table includes all retained tests in that interval. The Sent card counts
+  packets across those tests; Tested counts completed tests. Packet error codes
+  are unavailable and display an em dash.
+  Export PDF opens the browser print dialog; choose Save as PDF. The print layout
+  includes every packet row and omits application navigation and controls.
+  A plain-text download is also available.
+  Add to Report on the Tests screen attaches a copy of the selected test to
+  that report. Added tests remain available until reload or sign-out; download
+  the report to keep them. Running another test does not change an added copy.
   This does not use or complete the desktop reporting service stub.
 - Settings controls background/map motion locally. System reduced-motion settings
   take priority. Access retains the existing administrator account controls.
@@ -129,8 +176,10 @@ The interface only shows devices in the latest successful scan.
 | --- | --- |
 | `GET /api/network` | Any signed-in account; basic device and ping results, without admin metadata |
 | `GET /api/admin/dashboard` | Admin only; full map, recognition, activity, metrics, and history |
+| `GET /api/admin/devices/{id}` | Admin only; complete saved device details, its latest 20 activities and three ping tests |
+| `GET /api/admin/reports/{scan_id}` | Admin only; saved scan membership and retained ping tests from that scan until the next scan |
 | `POST /api/network/scan` | User/admin; no client-supplied subnet or command |
-| `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan and `count` 4/10/20 |
+| `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan, `count` 4/10/20, and optional `timeout_seconds` 1/2/5 (defaults to 1) |
 | `POST /api/devices/{id}` | Admin; `label` and/or `trust` (`trusted`, `review`, `flagged`) |
 
 Device mutations also require the existing Origin and CSRF checks. New tables
@@ -163,6 +212,10 @@ not scan the real network or create accounts in your application database.
 `tests/test_dashboard.py` additionally checks scan integration, subnet membership,
 trust/label persistence and scope, guest/user restrictions, measured ping results,
 timeouts, invalid targets, serialized operations, failed scans, and empty results.
+Report checks cover historical membership, inclusive/exclusive scan boundaries,
+UTC offsets, complete retained test history, empty scans, and administrator access.
+`tests/test_connectivity.py` verifies the selected timeout passed to Windows ping,
+the default timeout, and rejection of unsupported timeout values.
 
 ## Original desktop interface
 
@@ -289,10 +342,11 @@ encounters a backend failure does not publish partial results as a successful sc
 
 #### Local IP and subnet detection
 
-Detection requires Windows PowerShell (`powershell.exe`) and its NetTCPIP module.
-It reads `Get-NetIPConfiguration -All`, queries connected interfaces with
-`Get-NetIPAddress -AddressFamily IPv4 -PolicyStore ActiveStore`, and parses plain
-JSON fields. Python's `ipaddress` computes the subnet from the actual prefix;
+Detection reads Windows' native IP Helper APIs through an isolated Python helper
+(`ugnay/windows_network.py`). It does not start PowerShell or query CIM/WMI.
+`GetAdaptersAddresses`, `GetIfEntry2`, and `GetUnicastIpAddressEntry` provide the
+adapter status, physical-interface flag, metric, address state, source eligibility,
+and real IPv4 prefix as JSON. Python's `ipaddress` computes the subnet from that prefix;
 for example, `192.168.1.24/26` returns `192.168.1.0/26`.
 
 The selection rule is deterministic:
@@ -319,16 +373,17 @@ print(network.local_ip, network.subnet)
 Omit `interface_alias` for automatic selection. An explicitly requested interface
 must be connected and have a usable IPv4 address; detection does not silently
 switch to another interface. The alias is matched in Python, never interpolated
-into a PowerShell command. Each call reads fresh adapter data.
+into a shell command. Each call reads fresh adapter data.
 
-Detection raises `NetworkDetectionError` for unsupported platforms, unavailable
-PowerShell, command failures (including permission errors), a 20-second command
+Detection raises `NetworkDetectionError` for unsupported platforms, native API
+or helper failures (including permission errors), a 20-second helper
 timeout, malformed output, or no usable interface. The existing UI error handling
 can display these errors while retaining previous scan results.
 
-The commands and prefix information follow Microsoft's
-[Get-NetIPConfiguration documentation](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipconfiguration)
-and [Get-NetIPAddress documentation](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipaddress).
+The adapter and address information follow Microsoft's
+[GetAdaptersAddresses documentation](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses),
+[GetIfEntry2 documentation](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getifentry2),
+and [GetUnicastIpAddressEntry documentation](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getunicastipaddressentry).
 
 #### Device discovery
 
@@ -340,7 +395,7 @@ including the local machine, is included only if it responds to an ICMP echo.
 
 A bounded thread pool runs lightweight, isolated Python helpers from
 `ugnay/icmp_probe.py`, calling Windows' native `IcmpSendEcho` API through `ctypes`.
-PowerShell runs once for adapter detection, rather than once for every address.
+Adapter detection also uses a native Python helper; discovery does not start PowerShell.
 Each probe exchanges JSON over stdin and stdout. Only a success status
 (numeric value `0`) from the requested address
 counts as a response; ICMP timeouts and unreachable statuses are ordinary misses.
@@ -380,7 +435,7 @@ The process timeout must exceed the ICMP timeout by at least one second. The
 default host limit allows up to 1,024 candidates; an oversized range raises
 `ValueError` with its host count and configured limit. This prevents enumerating
 an unexpectedly large LAN. At most eight probe/lookup tasks run concurrently by
-default, avoiding the startup load of many simultaneous PowerShell processes.
+default, limiting simultaneous interpreter and native probe startup.
 The 15-second helper deadline is separate from the one-second ICMP reply timeout.
 
 The scan reuses the last successful detection on the same service instance. If

@@ -100,6 +100,50 @@ class DashboardStore:
                 raise AuthError("Device not found. Run a discovery scan first.", 404)
             return self._device(db, row)
 
+    def device_detail(self, identifier):
+        """Recent history for one device, independent of the global feed limits."""
+        with self.auth.connect() as db:
+            row = db.execute("SELECT * FROM discovered_devices WHERE id=?", (identifier,)).fetchone()
+            if not row:
+                raise AuthError("Device not found.", 404)
+            device = self._device(db, row)
+            device["activities"] = [dict(item) for item in db.execute(
+                "SELECT * FROM network_activity WHERE device_id=? ORDER BY id DESC LIMIT 20", (identifier,))]
+            device["ping_history"] = [{"id": item["id"], **json.loads(item["result"])} for item in db.execute(
+                "SELECT id,result FROM device_ping_tests WHERE device_id=? ORDER BY id DESC LIMIT 3", (identifier,))]
+        return device
+
+    def scan_report(self, identifier):
+        """Devices in a saved scan and tests completed before the following scan.
+
+        Scan membership is historical; device details use current saved values.
+        Ping history is bounded by its existing 1,000-test retention limit.
+        """
+        with self.auth.connect() as db:
+            scan = db.execute("SELECT id,scanned_at,snapshot FROM network_scans WHERE id=?", (identifier,)).fetchone()
+            if not scan:
+                raise AuthError("Scan not found. Select another saved scan.", 404)
+            following = db.execute("SELECT scanned_at FROM network_scans WHERE id>? ORDER BY id LIMIT 1", (identifier,)).fetchone()
+            end = following[0] if following else None
+            saved = json.loads(scan["snapshot"])
+            devices = []
+            for device_id in saved["device_ids"]:
+                row = db.execute("SELECT * FROM discovered_devices WHERE id=?", (device_id,)).fetchone()
+                if row:
+                    device = dict(row)
+                    device["name"] = device["label"] or device["hostname"] or "Unnamed device"
+                    device["ping_history"] = []
+                    devices.append(device)
+            by_id = {device["id"]: device for device in devices}
+            for row in db.execute("""SELECT id,device_id,result FROM device_ping_tests
+                    WHERE julianday(tested_at)>=julianday(?)
+                    AND (? IS NULL OR julianday(tested_at)<julianday(?)) ORDER BY id DESC""",
+                    (scan["scanned_at"], end, end)):
+                if row["device_id"] in by_id:
+                    by_id[row["device_id"]]["ping_history"].append({"id": row["id"], **json.loads(row["result"])})
+        return {"id": scan["id"], "scanned_at": scan["scanned_at"], "ended_at": end,
+                "network": saved["network"], "devices": devices}
+
     def update_device(self, identifier, changes, actor):
         if not changes or set(changes) - {"label", "trust"}:
             raise AuthError("Choose a device label or trust status.")

@@ -13,6 +13,7 @@ window.UgnayDashboard = (() => {
   let suppressMapClick = false;
   let browserSelected = null, browserFilter = "all", browserDetail = null, browserRequest = 0, browserDraft = null;
   let browserListFingerprint = "", deviceSaving = false, devicePinging = false;
+  let testsDetail = null, testsRequest = 0, testsSubmitting = false, reportTests = [];
   let motionEnabled = true;
   try { motionEnabled = localStorage.getItem("ugnay-motion") !== "off"; } catch { /* Storage is optional. */ }
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -85,6 +86,8 @@ window.UgnayDashboard = (() => {
     mapPage = 0; fit();
     if (data) { renderMap(); renderDevices(); renderActivities(); renderDeviceBrowser(); loadBrowserDetail(); }
     renderMapDeviceSummary();
+    if (view === "tests" && data) { renderTestResult(); loadTestsDetail(); }
+    window.UgnayReports.setActive(view === "reports");
     document.title = `${view === "map" ? "Network Map" : view[0].toUpperCase() + view.slice(1)} · UGNAY`;
     if (view === "access") context.loadUsers();
   }
@@ -112,7 +115,7 @@ window.UgnayDashboard = (() => {
     byId("average-latency").textContent = latency(data.metrics.average_latency_ms);
     byId("packet-loss").textContent = loss(data.metrics.packet_loss_percent);
     byId("average-latency").title = `Latest tests for ${data.metrics.tested_devices} currently detected devices`;
-    byId("run-test").disabled = !can("network.test") || data.busy || !data.devices.length;
+    updateTestControls();
     byId("profile-test").disabled = data.busy;
     renderMapDeviceSummary();
     byId("network-empty").hidden = !!data.network;
@@ -315,29 +318,36 @@ window.UgnayDashboard = (() => {
     byId("selected-device-activity-list").replaceChildren(...activities(history || []));
     byId("selected-device-activity-empty").hidden = !!history?.length;
   }
-  function renderDeviceLatency(device) {
-    const plot = byId("device-chart-plot"); plot.replaceChildren(); byId("device-latency-legend").replaceChildren(); byId("device-reply-data").replaceChildren();
-    let tests = device ? (browserDetail?.id === device.id ? browserDetail.ping_history || [] : data.test_history.filter((test) => test.device_id === device.id)) : [];
+  function latestDeviceTests(device, detail) {
+    let tests = device ? (detail?.id === device.id ? detail.ping_history || [] : data.test_history.filter((test) => test.device_id === device.id)) : [];
     if (device?.ping && !tests.some((test) => test.tested_at === device.ping.tested_at)) tests = [device.ping, ...tests];
-    tests = tests.slice(0, 3);
-    byId("device-latency-chart").toggleAttribute("hidden", !tests.length);
+    return tests.slice(0, 3);
+  }
+  function renderDeviceLatency(device) {
+    const tests = latestDeviceTests(device, browserDetail);
     byId("device-latency-empty").hidden = !!tests.length;
     byId("device-latency-empty").textContent = device ? "Run a ping test to see measured reply latency for this device." : "Select a device to view its reply latency.";
     const samples = tests.flatMap((test) => test.replies).filter((reply) => reply.latency_ms != null);
     byId("device-latency-description").textContent = tests.length && !samples.length ? "All requests timed out; no latency samples were received." : "Latency (ms) by request number; gaps indicate timeouts.";
+    drawReplyChart({ chart: "device-latency-chart", plot: "device-chart-plot", title: "device-chart-title", description: "device-chart-description", rows: "device-reply-data", legend: "device-latency-legend" }, device, tests);
+  }
+  function drawReplyChart(ids, device, tests, left = 18, right = 416) {
+    const plot = byId(ids.plot); plot.replaceChildren(); byId(ids.legend).replaceChildren(); byId(ids.rows).replaceChildren();
+    byId(ids.chart).toggleAttribute("hidden", !tests.length);
     if (!tests.length) return;
-    byId("device-chart-title").textContent = `${device.name} reply latency`;
-    byId("device-chart-description").textContent = `Latest ${tests.length} ping test${tests.length === 1 ? "" : "s"} for ${device.name}. ` + tests[0].replies.map((reply) => `Request ${reply.sequence}: ${reply.latency_ms == null ? "timed out" : latency(reply.latency_ms)}`).join("; ");
-    byId("device-reply-data").replaceChildren(...tests[0].replies.map((reply) => { const row = node("tr"); row.append(node("td", reply.sequence), node("td", reply.latency_ms == null ? "Timed out" : latency(reply.latency_ms))); return row; }));
+    byId(ids.title).textContent = `${device.name} reply latency`;
+    byId(ids.description).textContent = `Latest ${tests.length} ping test${tests.length === 1 ? "" : "s"} for ${device.name}. ` + tests[0].replies.map((reply) => `Request ${reply.sequence}: ${reply.latency_ms == null ? "timed out" : latency(reply.latency_ms)}`).join("; ");
+    byId(ids.rows).replaceChildren(...tests[0].replies.map((reply) => { const row = node("tr"); row.append(node("td", reply.sequence), node("td", reply.latency_ms == null ? "Timed out" : latency(reply.latency_ms))); return row; }));
+    const samples = tests.flatMap((test) => test.replies).filter((reply) => reply.latency_ms != null);
     const maximum = Math.max(1, ...samples.map((reply) => reply.latency_ms));
     const magnitude = 10 ** Math.floor(Math.log10(maximum / 4)), roughStep = maximum / 4 / magnitude;
     const step = (roughStep <= 1 ? 1 : roughStep <= 2 ? 2 : roughStep <= 5 ? 5 : 10) * magnitude;
     const ceiling = Math.ceil(maximum / step) * step;
     const requests = Math.max(2, ...tests.flatMap((test) => test.replies.map((reply) => reply.sequence)));
-    const x = (sequence) => 18 + (sequence - 1) / (requests - 1) * 398, y = (value) => 264 - value / ceiling * 248;
+    const x = (sequence) => left + (sequence - 1) / (requests - 1) * (right - left), y = (value) => 264 - value / ceiling * 248;
     for (let tick = 0; tick <= Math.round(ceiling / step); tick += 1) {
       const value = Number((tick * step).toPrecision(4)), position = y(value);
-      plot.append(svg("line", { x1: 18, y1: position, x2: 416, y2: position, class: "latency-grid" }), svg("text", { x: 10, y: position + 4, "text-anchor": "end", class: "latency-axis" }, String(value)));
+      plot.append(svg("line", { x1: left, y1: position, x2: right, y2: position, class: "latency-grid" }), svg("text", { x: left - 8, y: position + 4, "text-anchor": "end", class: "latency-axis" }, String(value)));
     }
     for (let sequence = 1; sequence <= requests; sequence += 1) {
       if (sequence !== 1 && sequence !== requests && (sequence - 1) % Math.ceil(requests / 6)) continue;
@@ -346,7 +356,7 @@ window.UgnayDashboard = (() => {
     const colors = ["#a7d7ff", "#ed7da9", "#a9df82"];
     tests.forEach((test, index) => {
       const label = node("span"), swatch = node("i", undefined, "latency-swatch"); swatch.style.setProperty("--series-color", colors[index]); swatch.setAttribute("aria-hidden", "true");
-      label.append(swatch, document.createTextNode(`${index === 0 ? "Latest" : "Previous"} · ${date(test.tested_at)}`)); byId("device-latency-legend").append(label);
+      label.append(swatch, document.createTextNode(`${index === 0 ? "Latest" : "Previous"} · ${date(test.tested_at)}`)); byId(ids.legend).append(label);
       const group = svg("g", { "data-ping-series": index }); let path = "";
       const finish = () => { if (path) group.prepend(svg("path", { d: path, stroke: colors[index], class: "latency-path" })); path = ""; };
       test.replies.forEach((reply) => {
@@ -439,30 +449,89 @@ window.UgnayDashboard = (() => {
   function renderTests() {
     const previous = byId("test-device").value;
     byId("test-device").replaceChildren(...data.devices.map((device) => {
-      const option = node("option", `${device.name} · ${device.ip_address}`); option.value = device.id; return option;
+      const option = node("option", `${device.name} / ${device.ip_address}`); option.value = device.id; return option;
     }));
     if (data.devices.some((device) => String(device.id) === previous)) byId("test-device").value = previous;
-    byId("test-device").disabled = !data.devices.length;
-    byId("run-test").textContent = data.busy && data.operation === "ping" ? "Testing…" : "Run ping test";
-    renderTestResult();
+    updateTestControls(); renderTestResult(); loadTestsDetail();
+    const status = byId("test-message");
+    if (currentView === "tests" && data.busy) {
+      notify("test-message", data.operation === "ping" ? "Ping test in progress. Results update when the test finishes." : "A network scan is in progress. Please wait.", true); status.dataset.operation = "true";
+    } else if (status.dataset.operation) { notify("test-message", data.error || ""); delete status.dataset.operation; }
+    else if (currentView === "tests" && data.error) notify("test-message", data.error);
+  }
+  const testsDevice = () => data?.devices.find((device) => String(device.id) === byId("test-device").value);
+  const reportTestKey = (device) => `${device.id}:${device.ping.tested_at}`;
+  function updateTestControls() {
+    const busy = !!data?.busy || testsSubmitting;
+    byId("run-test").disabled = !can("network.test") || busy || !data?.devices.length;
+    byId("run-test-label").textContent = testsSubmitting || data?.busy && data.operation === "ping" ? "Testing…" : "Run ping test";
+    byId("run-test").setAttribute("aria-busy", String(testsSubmitting || !!data?.busy && data.operation === "ping"));
+    byId("test-device").disabled = testsSubmitting || !data?.devices.length;
+    byId("test-count").disabled = byId("test-timeout").disabled = testsSubmitting;
+  }
+  async function loadTestsDetail() {
+    const device = testsDevice();
+    if (currentView !== "tests" || !device || !context) return;
+    const identifier = device.id, session = context.session, request = ++testsRequest;
+    try {
+      const result = await context.api(`/api/admin/devices/${identifier}`);
+      if (context?.session !== session || currentView !== "tests" || testsDevice()?.id !== identifier || request !== testsRequest) return;
+      testsDetail = result.device; renderTestResult();
+    } catch (error) {
+      if (context?.session === session && currentView === "tests" && testsDevice()?.id === identifier && request === testsRequest) notify("test-message", `Could not load test history: ${error.message}`);
+    }
   }
   function renderTestResult() {
-    const device = data?.devices.find((item) => String(item.id) === byId("test-device").value);
-    const container = byId("test-result"); container.replaceChildren();
-    if (!device?.ping) { container.append(node("p", device ? "No detailed ping test yet. Run a test to measure this connection." : "Scan for devices before running a test.", "muted")); return; }
-    const metrics = node("div", undefined, "test-metrics");
-    metrics.append(...cards([["Average latency", latency(device.ping.average_latency_ms)], ["Maximum latency", latency(device.ping.maximum_latency_ms)], ["Packet loss", loss(device.ping.packet_loss_percent)]]));
-    const replies = node("div", undefined, "reply-list");
-    replies.append(...device.ping.replies.map((reply) => {
-      const result = node("div", undefined, reply.latency_ms == null ? "timeout" : "");
-      result.append(node("small", `Request ${reply.sequence}`), node("span", reply.latency_ms == null ? "No response" : latency(reply.latency_ms))); return result;
-    }));
-    container.append(node("h2", device.name), node("p", `Tested ${date(device.ping.tested_at)}`, "muted"), metrics, replies);
+    const device = testsDevice(), ping = device?.ping;
+    const tests = latestDeviceTests(device, testsDetail);
+    drawReplyChart({ chart: "test-response-chart", plot: "test-chart-plot", title: "test-chart-title", description: "test-chart-description", rows: "test-reply-data", legend: "test-chart-legend" }, device, tests, 26, 652);
+    const empty = device ? "Run a ping test to see measured responses for this device." : "Scan your network to select a test target.";
+    byId("test-chart-empty").hidden = !!tests.length; byId("test-chart-empty").textContent = empty;
+    byId("test-responses-empty").hidden = !!ping; byId("test-responses-empty").textContent = empty;
+    const received = ping?.replies.filter((reply) => reply.latency_ms != null).length || 0;
+    const sent = ping?.replies.length || 0, lost = sent - received;
+    const rows = ping ? ping.replies.map((reply) => {
+      const timeout = reply.latency_ms == null, row = node("li", undefined, timeout ? received ? "reply-timeout" : "reply-unreachable" : "reply-success");
+      const icon = node("span", timeout ? received ? "◷" : "×" : "✓", "test-response-icon"); icon.setAttribute("aria-hidden", "true");
+      row.append(icon, node("span", timeout ? `No ping response · request ${reply.sequence}` : `Ping reply ${reply.sequence}`, "test-response-label"), node("span", timeout ? "Timed out" : latency(reply.latency_ms), "test-response-value")); return row;
+    }) : [];
+    if (lost && received) {
+      const row = node("li", undefined, "reply-loss"), icon = node("span", "⚠", "test-response-icon"); icon.setAttribute("aria-hidden", "true");
+      row.append(icon, node("span", "Packet loss detected", "test-response-label"), node("span", loss(ping.packet_loss_percent), "test-response-value")); rows.push(row);
+    }
+    byId("test-response-list").replaceChildren(...rows);
+    byId("test-sent").textContent = ping ? String(sent) : "—";
+    byId("test-received").textContent = ping ? String(received) : "—";
+    byId("test-loss").textContent = loss(ping?.packet_loss_percent);
+    byId("test-average").textContent = latency(ping?.average_latency_ms);
+    byId("test-maximum").textContent = latency(ping?.maximum_latency_ms);
+    byId("test-chart-caption").textContent = ping && !received ? "No replies were received in the latest test; gaps indicate timeouts." : "Latency (ms) by request number; gaps indicate timeouts.";
+    byId("test-recommendation").textContent = !ping ? "Select a target and run a ping test to check connectivity." : !received ? "No replies received. Check the device's connection and whether it allows ICMP replies." : lost ? "Packet loss was detected. Repeat the test and check the device's connection." : "No packet loss detected. This device responded to every request.";
+    const added = !!ping && reportTests.some((entry) => entry.key === reportTestKey(device));
+    byId("add-test-report").disabled = !ping || data.busy || testsSubmitting || added;
+    byId("add-test-report").textContent = added ? "Added to Report" : "Add to Report";
   }
-  async function runPing(identifier, count, messageId) {
+  async function runPing(identifier, count, messageId, timeoutSeconds) {
     if (currentView === "dashboard" || !can("network.test")) return;
-    try { await context.api(`/api/devices/${identifier}/ping`, { count }); notify(messageId); await context.refresh(); }
-    catch (error) { notify(messageId, error.message); }
+    const session = context.session, payload = { count };
+    if (timeoutSeconds !== undefined) payload.timeout_seconds = timeoutSeconds;
+    try { await context.api(`/api/devices/${identifier}/ping`, payload); if (context?.session !== session) return; notify(messageId); await context.refresh(); }
+    catch (error) { if (context?.session === session) notify(messageId, error.message); }
+  }
+  async function runTestsPing(event) {
+    event.preventDefault();
+    if (currentView !== "tests" || !testsDevice() || !can("network.test") || data.busy || testsSubmitting) return;
+    const session = context.session, identifier = testsDevice().id, count = Number(byId("test-count").value), timeout = Number(byId("test-timeout").value);
+    testsSubmitting = true; updateTestControls(); renderTestResult();
+    try { await runPing(identifier, count, "test-message", timeout); }
+    finally { if (context?.session === session) { testsSubmitting = false; updateTestControls(); renderTestResult(); } }
+  }
+  function addTestToReport() {
+    const device = testsDevice();
+    if (currentView !== "tests" || !device?.ping || data.busy || testsSubmitting) return;
+    const key = reportTestKey(device);
+    if (!reportTests.some((entry) => entry.key === key)) reportTests.push({ key, name: device.name, ip_address: device.ip_address, ping: JSON.parse(JSON.stringify(device.ping)) });
+    renderReport(); renderTestResult(); notify("test-message", "Ping test added to your report. Open Reports to review or download it.", true);
   }
   async function saveBrowserDevice(event) {
     event.preventDefault();
@@ -495,8 +564,7 @@ window.UgnayDashboard = (() => {
     }));
   }
   function renderReport() {
-    byId("report-summary").replaceChildren(...cards([["Devices detected", String(data.devices.length)], ["Latest average latency", latency(data.metrics.average_latency_ms)], ["Latest packet loss", loss(data.metrics.packet_loss_percent)], ["Last scan", date(data.scanned_at)]]));
-    byId("download-report").disabled = !data.scanned_at;
+    window.UgnayReports.render(data, reportTests);
   }
   function renderSecurity() {
     byId("trust-summary").replaceChildren(...cards(Object.entries(trustNames).map(([key, title]) => [title, String(data.devices.filter((device) => device.trust === key).length)])));
@@ -505,13 +573,6 @@ window.UgnayDashboard = (() => {
       button.append(node("strong", device.name), node("small", device.ip_address), trustBadge(device));
       button.addEventListener("click", () => showProfile(device.id)); return button;
     }));
-  }
-  function downloadReport() {
-    if (!data.scanned_at) return;
-    const lines = ["UGNAY — Network snapshot", `Last scan: ${date(data.scanned_at)}`, `Local IP: ${data.network.local_ip}`, `Subnet: ${data.network.subnet}`, `Devices detected: ${data.devices.length}`, `Average latency (latest tests): ${latency(data.metrics.average_latency_ms)}`, `Packet loss (latest tests): ${loss(data.metrics.packet_loss_percent)}`, "", "Name | IP address | Trust | Ping status | Average latency | Packet loss", ...data.devices.map((device) => `${device.name} | ${device.ip_address} | ${trustNames[device.trust]} | ${device.status} | ${latency(device.ping?.average_latency_ms)} | ${loss(device.ping?.packet_loss_percent)}`), "", "Topology shows subnet membership; physical links are not detected.", "Trust is an administrator label stored by subnet/IP; it does not block traffic."];
-    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob), link = node("a"); link.href = url; link.download = "UGNAY-network-report.txt"; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   const canPanMap = () => currentView === "map" || (currentView === "dashboard" && box.width < (mobileMap.matches ? 420 : 1000) - .01);
@@ -564,9 +625,9 @@ window.UgnayDashboard = (() => {
       finally { byId("save-device").disabled = false; }
     });
     byId("profile-test").addEventListener("click", async () => { if (!currentDevice() || currentView === "dashboard" || !can("network.test")) return; byId("profile-test").disabled = true; await runPing(selected, 4, "profile-message"); if (data) byId("profile-test").disabled = data.busy; });
-    byId("test-form").addEventListener("submit", async (event) => { event.preventDefault(); if (!byId("test-device").value) return; byId("run-test").disabled = true; await runPing(Number(byId("test-device").value), Number(byId("test-count").value), "test-message"); if (data) byId("run-test").disabled = data.busy || !can("network.test"); });
-    byId("test-device").addEventListener("change", renderTestResult);
-    byId("download-report").addEventListener("click", downloadReport);
+    byId("test-form").addEventListener("submit", runTestsPing);
+    byId("test-device").addEventListener("change", () => { testsDetail = null; testsRequest += 1; notify("test-message"); renderTestResult(); loadTestsDetail(); });
+    byId("add-test-report").addEventListener("click", addTestToReport);
     byId("motion-enabled").addEventListener("change", () => { motionEnabled = byId("motion-enabled").checked; try { localStorage.setItem("ugnay-motion", motionEnabled ? "on" : "off"); } catch { /* Optional preference. */ } syncMotion(); });
     byId("map-zoom-in").addEventListener("click", () => zoom(.8)); byId("map-zoom-out").addEventListener("click", () => zoom(1.25)); byId("map-fit").addEventListener("click", fit);
     byId("map-prev").addEventListener("click", () => { mapPage = Math.max(0, mapPage - 1); closeProfile(); renderMap(); });
@@ -613,8 +674,10 @@ window.UgnayDashboard = (() => {
       throw new Error("Administrator access is required for this dashboard.");
     }
     context = options; if (!initialized) initialize();
+    window.UgnayReports.mount({ ...options, drawReplyChart });
     lastFingerprint = ""; selected = null; data = null; mapPage = 0; collapsed = false;
     browserSelected = null; browserFilter = "all"; browserDetail = null; browserDraft = null; browserListFingerprint = ""; browserRequest += 1; deviceSaving = devicePinging = false;
+    testsDetail = null; testsRequest += 1; testsSubmitting = false; reportTests = [];
     byId("access-nav").hidden = !can("users.manage");
     byId("account-initials").textContent = initials(context.session.user.username);
     byId("account-menu-email").textContent = context.session.user.email || "Temporary guest account";
@@ -627,9 +690,15 @@ window.UgnayDashboard = (() => {
     endDrag();
     data = null; context = null; lastFingerprint = "";
     browserSelected = null; browserFilter = "all"; browserDetail = null; browserDraft = null; browserListFingerprint = ""; browserRequest += 1; deviceSaving = devicePinging = false;
+    testsDetail = null; testsRequest += 1; testsSubmitting = false; reportTests = [];
     closeProfile(); byId("account-menu").hidden = true;
+    window.UgnayReports.reset();
     // Do not leave private dashboard data in the page after logout or a role change.
-    ["map-graph", "device-rows", "activity-list", "history-activity", "scan-history-rows", "test-device", "test-result", "report-summary", "trust-summary", "security-devices", "user-rows", "profile-facts", "profile-name", "profile-ip", "profile-avatar", "profile-trust", "account-menu-email", "permissions-list", "account-email", "session-expiry", "welcome-name", "role-badge"].forEach((id) => byId(id).replaceChildren());
+    ["map-graph", "device-rows", "activity-list", "history-activity", "scan-history-rows", "test-device", "trust-summary", "security-devices", "user-rows", "profile-facts", "profile-name", "profile-ip", "profile-avatar", "profile-trust", "account-menu-email", "permissions-list", "account-email", "session-expiry", "welcome-name", "role-badge"].forEach((id) => byId(id).replaceChildren());
+    ["test-response-list", "test-chart-plot", "test-chart-legend", "test-reply-data", "test-chart-title", "test-chart-description", "report-test-rows"].forEach((id) => byId(id).replaceChildren());
+    ["test-sent", "test-received", "test-loss", "test-average", "test-maximum"].forEach((id) => { byId(id).textContent = "—"; });
+    byId("test-response-chart").setAttribute("hidden", ""); byId("report-added-tests").hidden = true; byId("add-test-report").disabled = true;
+    byId("test-responses-empty").hidden = byId("test-chart-empty").hidden = false; byId("test-form").reset(); delete byId("test-message").dataset.operation;
     ["workspace-message", "admin-message", "profile-message", "test-message"].forEach((id) => notify(id));
     ["device-list", "selected-device-name", "selected-device-avatar", "selected-device-ip", "selected-device-trust", "selected-device-facts", "selected-device-measurements", "selected-device-activity-list", "device-chart-plot", "device-latency-legend", "device-reply-data", "device-chart-title", "device-chart-description"].forEach((id) => byId(id).replaceChildren());
     byId("selected-device-form").reset(); notify("selected-device-message");

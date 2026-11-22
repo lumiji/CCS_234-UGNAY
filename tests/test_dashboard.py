@@ -1,6 +1,7 @@
 """Dashboard API integration tests. All discovery and ping operations are fake."""
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 import json
 from pathlib import Path
@@ -44,9 +45,11 @@ class Connectivity:
         self.calls = []
         self.release = threading.Event()
         self.release.set()
+        self.timeouts = []
 
-    def test_connection(self, device, count):
+    def test_connection(self, device, count, *, timeout_seconds=None):
         self.calls.append((device.ip_address, count))
+        self.timeouts.append(timeout_seconds)
         self.release.wait(5)
         if self.error:
             raise RuntimeError(self.error)
@@ -175,6 +178,21 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(snapshot["metrics"]["average_latency_ms"])
         self.assertEqual(snapshot["metrics"]["packet_loss_percent"], 100.)
 
+    def test_selected_ping_timeout_reaches_connectivity_service(self):
+        device = self.scan()["devices"][0]
+        self.assertEqual(self.request(f"/api/devices/{device['id']}/ping", {"count": 4, "timeout_seconds": 2})[0], 202)
+        self.idle()
+        self.assertEqual(self.connectivity.timeouts, [2])
+        self.assertEqual(self.connectivity.calls, [(device["ip_address"], 4)])
+
+    def test_invalid_ping_timeout_is_rejected_before_operation_starts(self):
+        device = self.scan()["devices"][0]
+        for timeout in (0, -1, True, "2", 2.0, 3, 99999):
+            with self.subTest(timeout=timeout):
+                self.assertEqual(self.request(f"/api/devices/{device['id']}/ping", {"count": 4, "timeout_seconds": timeout})[0], 400)
+                self.assertFalse(self.request("/api/admin/dashboard")[1]["busy"])
+        self.assertFalse(self.connectivity.calls)
+
     def test_invalid_test_targets_counts_and_metadata_rejected(self):
         device = self.scan()["devices"][0]
         for count in (0, -1, "4", True, 1000):
@@ -288,6 +306,56 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(detail["ping_history"]), 3)
         self.assertEqual([test["id"] for test in detail["ping_history"]], sorted((test["id"] for test in detail["ping_history"]), reverse=True))
 
+    def test_scan_report_uses_historical_membership_and_scan_test_interval(self):
+        start = datetime(2026, 11, 22, 6, tzinfo=timezone.utc)
+        first_scan = DiscoveryResult(network=self.discovery.network, devices=self.discovery.devices, scanned_at=start)
+        self.server.dashboard.save_scan(first_scan, "Test")
+        snapshot = self.server.dashboard.snapshot()
+        first_id = snapshot["scan_history"][0]["id"]
+        first, second = snapshot["devices"]
+        ping = self.connectivity.test_connection(Device(first["ip_address"]), 4)
+        # Before the scan is excluded; the start boundary is inclusive, even
+        # when an equivalent timestamp uses a different UTC offset.
+        for at in (start - timedelta(seconds=1), start.astimezone(timezone(timedelta(hours=8))), start + timedelta(minutes=59)):
+            self.server.dashboard.save_ping(first["id"], replace(ping, tested_at=at), "Test")
+        self.server.dashboard.save_scan(replace(first_scan, devices=(self.discovery.devices[1],), scanned_at=start + timedelta(hours=1)), "Test")
+        second_id = self.server.dashboard.snapshot()["scan_history"][0]["id"]
+        self.server.dashboard.save_ping(first["id"], replace(ping, tested_at=start + timedelta(hours=1)), "Test")
+        self.server.dashboard.save_ping(second["id"], replace(ping, tested_at=start + timedelta(hours=1, minutes=1)), "Test")
+        report = self.request(f"/api/admin/reports/{first_id}")[1]["report"]
+        self.assertEqual({item["id"] for item in report["devices"]}, {first["id"], second["id"]})
+        self.assertEqual(len(report["devices"][0]["ping_history"]), 2)
+        self.assertFalse(report["devices"][1]["ping_history"])
+        self.assertIsNotNone(report["ended_at"])
+        latest = self.request(f"/api/admin/reports/{second_id}")[1]["report"]
+        self.assertEqual([item["id"] for item in latest["devices"]], [second["id"]])
+        self.assertEqual(len(latest["devices"][0]["ping_history"]), 1)
+        self.assertIsNone(latest["ended_at"])
+
+    def test_scan_report_includes_history_beyond_global_dashboard_feed(self):
+        snapshot = self.scan()
+        device = snapshot["devices"][0]
+        ping = self.connectivity.test_connection(Device(device["ip_address"]), 4)
+        for _ in range(35):
+            self.server.dashboard.save_ping(device["id"], ping, "Test")
+        report = self.request(f"/api/admin/reports/{snapshot['scan_history'][0]['id']}")[1]["report"]
+        history = report["devices"][0]["ping_history"]
+        self.assertEqual(len(history), 35)
+        self.assertEqual([test["id"] for test in history], sorted((test["id"] for test in history), reverse=True))
+
+    def test_scan_report_is_admin_only_and_rejects_unknown_scans(self):
+        scan_id = self.scan()["scan_history"][0]["id"]
+        for role in ("guest", "user"):
+            self.assertEqual(self.request(f"/api/admin/reports/{scan_id}", role=role)[0], 403)
+        self.assertEqual(self.request("/api/admin/reports/99999")[0], 404)
+
+    def test_empty_scan_report_has_no_invented_results(self):
+        self.discovery.devices = ()
+        scan_id = self.scan()["scan_history"][0]["id"]
+        status, result = self.request(f"/api/admin/reports/{scan_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["report"]["devices"], [])
+
     def test_basic_network_view_excludes_admin_data(self):
         device = self.scan()["devices"][0]
         self.request(f"/api/devices/{device['id']}", {"label": "Private admin label", "trust": "flagged"})
@@ -307,6 +375,7 @@ class DashboardTests(unittest.TestCase):
         try:
             self.assertEqual(self.request("/api/admin/dashboard", role="user")[0], 403)
             self.assertEqual(self.request("/api/admin/devices/1", role="user")[0], 403)
+            self.assertEqual(self.request("/api/admin/reports/1", role="user")[0], 403)
         finally:
             with self.auth.connect() as db:
                 db.execute("DELETE FROM role_permissions WHERE role='user' AND permission='dashboard.view'")

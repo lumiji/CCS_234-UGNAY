@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/dashboard.css">
   <script src="/dashboard.js" defer></script>
+  <script src="/reports.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -143,7 +144,7 @@
           </div>
           <div class="map-zoom" id="map-pager" role="group" aria-label="Map pages" hidden><button id="map-prev" type="button" hidden>Previous</button><span id="map-page"></span><button id="map-next" type="button" hidden>Next</button></div>
         </div>
-        <p class="map-disclosure" id="map-disclosure">Subnet membership · Physical links are not detected</p>
+        <p class="map-disclosure sr-only" id="map-disclosure">Subnet membership · Physical links are not detected</p>
       </section>
 
       <section class="device-board" id="device-board" aria-label="Devices and recent activity">
@@ -157,6 +158,18 @@
           </div>
           <section class="activity-column" id="board-activity" aria-labelledby="activity-title"><h2 id="activity-title">Recent Activity</h2><ol id="activity-list" class="activity-list"></ol><p id="activity-empty" class="muted">Your network activity will appear here.</p></section>
         </div>
+      </section>
+
+      <section id="network-map-actions" class="network-map-actions" aria-label="Network map actions" hidden>
+        <div id="map-selected-device" class="map-selected-device" hidden>
+          <div class="map-device-avatar" aria-hidden="true"><img src="/assets/device-wifi.svg" alt="" width="38" height="38"></div>
+          <div class="map-device-copy">
+            <div class="map-device-title"><h2 id="map-device-name"></h2><span id="map-device-trust" class="trust-badge"></span></div>
+            <p class="map-device-meta"><span id="map-device-hostname" title="Detected hostname"></span><span id="map-device-ip" title="IP address"></span><span id="map-device-mac" title="MAC address"></span></p>
+          </div>
+        </div>
+        <p id="map-device-empty" class="map-device-empty">Scan your network to discover devices.</p>
+        <button id="open-map-device" class="primary-button" type="button" disabled>Open Device</button>
       </section>
 
       </div>
@@ -203,9 +216,55 @@
         </section>
       </section>
 
-      <section id="tests-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">CONNECTIVITY</p><h1>Ping tests</h1><p class="muted">Measure the response time and packet loss of a device from your latest scan.</p><form id="test-form" class="test-controls"><label for="test-device">Device<select id="test-device" required></select></label><label for="test-count">Requests<select id="test-count"><option value="4">4 requests</option><option value="10">10 requests</option><option value="20">20 requests</option></select></label><button class="primary-button" id="run-test" type="submit">Run ping test</button></form><p id="test-message" class="form-message" role="status" hidden></p><div id="test-result"></div></section>
+      <section id="tests-panel" class="tests-page" aria-label="Connectivity tests" hidden>
+        <form id="test-form" class="tests-config">
+          <div class="tests-heading"><h1>Tests</h1><p>Run a network test to check device connectivity.</p></div>
+          <button class="primary-button" id="run-test" type="submit"><svg viewBox="0 0 22 16" width="22" height="16" aria-hidden="true"><path d="M1 8H5L8 2L12 14L15 6H21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span id="run-test-label">Run ping test</span></button>
+          <div class="tests-fields">
+            <label for="test-device">Target<select id="test-device" required></select></label>
+            <label for="test-count">Packets<select id="test-count"><option value="4">4</option><option value="10">10</option><option value="20">20</option></select></label>
+            <label for="test-timeout">Timeout (s)<select id="test-timeout"><option value="1">1</option><option value="2" selected>2</option><option value="5">5</option></select></label>
+          </div>
+          <p id="test-message" class="form-message" role="status" hidden></p>
+        </form>
+        <div id="test-result" class="tests-results">
+          <section class="test-responses" aria-labelledby="test-responses-title"><h2 id="test-responses-title">Ping Responses</h2><ol id="test-response-list" class="test-response-list"></ol><p id="test-responses-empty" class="test-results-empty">Run a ping test to see per-request responses.</p></section>
+          <section class="test-chart-panel" aria-labelledby="test-response-time-title"><h2 id="test-response-time-title">Response Time</h2><p id="test-chart-caption">Latency (ms) by request number; gaps indicate timeouts.</p><div id="test-chart-legend" class="sr-only" aria-label="Displayed ping tests"></div><svg id="test-response-chart" viewBox="0 0 660 300" preserveAspectRatio="none" role="img" aria-labelledby="test-chart-title test-chart-description" hidden><title id="test-chart-title">Ping response time</title><desc id="test-chart-description"></desc><g id="test-chart-plot"></g></svg><p id="test-chart-empty" class="test-results-empty">Run a ping test to plot measured response times.</p><table class="sr-only"><caption>Latest ping response measurements</caption><thead><tr><th>Request</th><th>Latency</th></tr></thead><tbody id="test-reply-data"></tbody></table></section>
+        </div>
+        <section class="tests-summary" aria-label="Latest ping test summary">
+          <div class="tests-summary-metrics"><div><span>Sent</span><strong id="test-sent">—</strong></div><div><span>Received</span><strong id="test-received">—</strong></div><div><span>Loss</span><strong id="test-loss">—</strong></div><div><span>Avg</span><strong id="test-average">—</strong></div><div><span>Max</span><strong id="test-maximum">—</strong></div></div>
+          <div class="tests-summary-actions"><p class="test-recommendation"><strong>Recommendation:</strong> <span id="test-recommendation">Select a target and run a ping test to check connectivity.</span></p><button id="add-test-report" class="primary-button" type="button" disabled>Add to Report</button></div>
+        </section>
+      </section>
       <section id="history-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">NETWORK HISTORY</p><h1>Every scan, recorded.</h1><p class="muted">Completed discovery scans are saved locally. Failed scans preserve the previous results.</p><div class="table-scroll"><table><caption class="sr-only">Scan history</caption><thead><tr><th>Completed</th><th>Network range</th><th>Devices</th></tr></thead><tbody id="scan-history-rows"></tbody></table></div><h2 class="history-activity-heading">Recent activity</h2><ol id="history-activity" class="activity-list"></ol></section>
-      <section id="reports-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">LATEST SCAN SNAPSHOT</p><h1>Your network report.</h1><p class="muted">A summary of the latest discovery scan and the latest measured ping results for its devices.</p><div id="report-summary" class="report-summary"></div><button class="primary-button" id="download-report" type="button">Download report</button><p class="muted report-footnote">Trust is an administrator decision. A successful ping does not establish that a device is safe.</p></section>
+      <section id="reports-panel" class="reports-page" aria-label="Network reports" hidden>
+        <div class="reports-config">
+          <div class="reports-heading"><h1>Reports</h1><p>Review network tests and device connectivity.</p></div>
+          <button id="export-report-pdf" class="secondary-button" type="button" disabled><svg viewBox="0 0 22 22" width="22" height="22" aria-hidden="true"><path d="M11 2v12m-5-5 5 5 5-5M3 14v5h16v-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Export PDF</button>
+          <div class="reports-fields"><label for="report-device">Selected Device<select id="report-device" disabled><option value="">No detected devices</option></select></label><label for="report-scan">Selected Date and Scan<select id="report-scan" disabled><option value="">No saved scans</option></select></label></div>
+          <p id="report-message" class="form-message" role="status" hidden></p><p id="report-print-context" class="report-print-context"></p>
+        </div>
+        <section class="reports-health" aria-labelledby="report-health-title"><h2 id="report-health-title">Network Health Summary</h2><p id="report-date-context">Scan your network to create a report.</p>
+          <div class="report-health-metrics">
+            <div class="report-health-stat" title="Packets sent across this device's tests in the selected scan"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><rect x="9" y="8" width="30" height="24" rx="4" fill="currentColor"/><path d="M5 38h38" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg><div><strong id="report-sent">—</strong><span>Sent<span class="sr-only"> packets</span></span></div></div>
+            <div class="report-health-stat" title="Completed ping tests for this device in the selected scan"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="currentColor"/><path d="m15 23 8 9 15-21" fill="none" stroke="#15283e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong id="report-tested">—</strong><span>Tested<span class="sr-only"> (completed tests)</span></span></div></div>
+            <div class="report-health-latest"><svg viewBox="0 0 50 38" width="50" height="38" aria-hidden="true"><path d="M3 19h9L20 4l11 30 7-15h10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong id="report-latest">—</strong><span>latest test</span></div></div>
+          </div>
+        </section>
+        <section class="reports-charts" aria-labelledby="report-trend-title">
+          <div class="reports-chart-heading"><h2 id="report-trend-title">Latency trend (selected scan)</h2><div class="report-bar-legend" aria-label="Reply count chart legend"><span><i class="report-success-swatch"></i>Replies</span><span><i class="report-failure-swatch"></i>No response</span></div></div>
+          <div class="reports-chart-grid">
+            <div class="report-line-panel"><div id="report-line-legend" class="sr-only" aria-label="Displayed ping tests"></div><svg id="report-line-chart" viewBox="0 0 660 300" preserveAspectRatio="none" role="img" aria-labelledby="report-line-title report-line-description" hidden><title id="report-line-title">Reply latency</title><desc id="report-line-description"></desc><g id="report-line-plot"></g></svg><p id="report-line-empty" class="report-chart-empty">Run a ping test to plot measured latency.</p><table class="sr-only"><caption>Latest test replies for the selected report</caption><thead><tr><th>Request</th><th>Latency</th></tr></thead><tbody id="report-reply-data"></tbody></table></div>
+            <div class="report-bar-panel"><svg id="report-bar-chart" viewBox="0 0 420 300" preserveAspectRatio="none" role="img" aria-labelledby="report-bar-title report-bar-description" hidden><title id="report-bar-title">Replies and timeouts by test</title><desc id="report-bar-description"></desc><g id="report-bar-plot"></g></svg><p id="report-bar-empty" class="report-chart-empty">Reply counts will appear after a test.</p></div>
+          </div>
+        </section>
+        <div class="reports-details">
+          <section class="report-device-info" aria-labelledby="report-info-title"><h2 id="report-info-title">Device Info</h2><div id="report-device-identity" class="report-device-identity"></div><dl id="report-device-facts"></dl><p id="report-device-empty" class="muted">Select a device to view its information.</p></section>
+          <section class="report-packets" aria-label="Packet results"><div class="report-packet-scroll"><table><caption class="sr-only">Packet results for all saved tests of the selected device in this scan. Failure means no reply; packet error codes are not recorded.</caption><thead><tr><th>Packet</th><th>Success</th><th>Failure</th><th>Error</th><th>Test Time</th></tr></thead><tbody id="report-packet-rows"></tbody></table><p id="report-packets-empty" class="muted">No ping tests recorded for this device in the selected scan.</p></div></section>
+        </div>
+        <div class="reports-notes"><p>Tests belong to the interval from the selected scan until the next scan. Device details use current saved values. Failure means no reply; packet error codes are not recorded. History retains up to 1,000 tests.</p><button id="download-report" class="text-button" type="button" disabled>Download text report</button></div>
+        <section id="report-added-tests" class="report-added-tests" aria-labelledby="report-added-tests-title" hidden><h2 id="report-added-tests-title">Added ping tests</h2><p>These saved copies are included in your export, independently of the selectors. They stay here until reload or sign-out.</p><div class="table-scroll"><table><caption class="sr-only">Ping tests added to the report</caption><thead><tr><th>Device</th><th>Tested</th><th>Sent</th><th>Received</th><th>Loss</th><th>Avg</th><th>Max</th></tr></thead><tbody id="report-test-rows"></tbody></table></div></section>
+      </section>
       <section id="security-panel" class="workspace-card detail-panel" hidden><p class="eyebrow">DEVICE RECOGNITION</p><h1>Know your connections.</h1><p class="muted">New devices start in Review. Select a device to view its profile and, as an administrator, update its trust status.</p><div id="trust-summary" class="trust-summary"></div><p class="identity-note">Recognition is saved by subnet and IP address. DHCP can assign an address to a different device; confirm its identity before trusting it. These labels do not block network traffic.</p><div id="security-devices" class="security-devices"></div></section>
       <section class="workspace-card admin-panel detail-panel" id="admin-panel" aria-labelledby="admin-title" hidden><div class="section-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1 id="admin-title">Account access</h1></div><button class="secondary-button" id="refresh-users" type="button">Refresh accounts</button></div><p class="muted">Role, status, and password changes revoke the account’s existing sessions.</p><p id="admin-message" class="form-message" role="status" hidden></p><div class="table-scroll"><table><caption class="sr-only">Account management</caption><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="user-rows"></tbody></table></div></section>
       <section class="workspace-card access-panel detail-panel" id="settings-panel" aria-labelledby="access-title" hidden><p class="eyebrow">SETTINGS &amp; YOUR ACCESS</p><h1 id="access-title">Make yourself at home.</h1><p class="muted" id="account-email"></p><label class="motion-setting"><input id="motion-enabled" type="checkbox"> Animate the background and network map</label><p class="muted">Your system’s reduced-motion preference takes priority.</p><ul id="permissions-list" class="permissions-list"></ul><div class="session-note"><span>Session expires</span><strong id="session-expiry"></strong></div><p class="muted guest-note" id="guest-note" hidden>Guest access lasts up to two hours. Create an account to run discovery and ping tests.</p><a href="#signup" id="guest-signup" hidden>Create an account</a></section>

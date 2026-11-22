@@ -13,6 +13,7 @@ class ConnectivityService:
     """Run ICMP ping tests and calculate connectivity statistics."""
 
     ALLOWED_COUNTS = (4, 10, 20)
+    ALLOWED_TIMEOUTS = (1, 2, 5)
     TIMEOUT_MS = 1000
 
     @staticmethod
@@ -50,11 +51,14 @@ class ConnectivityService:
 
         return None
 
-    def test_connection(self, device: Device, count: int) -> PingResult:
+    def test_connection(self, device: Device, count: int, *, timeout_seconds: int | None = None) -> PingResult:
         """Ping a selected device and return its measured statistics."""
 
         if count not in self.ALLOWED_COUNTS:
             raise ValueError("Ping count must be 4, 10, or 20.")
+        if timeout_seconds is not None and (type(timeout_seconds) is not int or timeout_seconds not in self.ALLOWED_TIMEOUTS):
+            raise ValueError("Ping timeout must be 1, 2, or 5 seconds.")
+        timeout_ms = self.TIMEOUT_MS if timeout_seconds is None else timeout_seconds * 1000
 
         try:
             ip = ipaddress.ip_address(device.ip_address)
@@ -70,20 +74,20 @@ class ConnectivityService:
         for sequence in range(1, count + 1):
             try:
                 # -n 1 sends one request.
-                # -w 1000 waits up to 1000ms for a reply.
+                # -w sets the selected per-request deadline in milliseconds.
                 # -4 explicitly uses IPv4.
                 completed = subprocess.run(
                     [
                         "ping",
                         "-4",
                         "-n", "1",
-                        "-w", str(self.TIMEOUT_MS),
+                        "-w", str(timeout_ms),
                         str(ip),
                     ],
                     capture_output=True,
                     text=True,
                     errors="replace",
-                    timeout=5,
+                    timeout=max(5, timeout_ms / 1000 + 2),
                     creationflags=getattr(
                         subprocess, "CREATE_NO_WINDOW", 0
                     ),

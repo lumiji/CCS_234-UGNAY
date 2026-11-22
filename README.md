@@ -104,6 +104,13 @@ rendered administrator data from the page before another account can sign in.
   use map pages (eight devices per page on desktop, four on mobile) to keep labels
   readable. The Devices tab provides search and the full list; the Dashboard
   previews up to four devices.
+- Network Map dedicates the main area to the map without a sliding device/activity
+  board. Clicking a device still opens its profile popup. The bottom action bar
+  shows the selected device's icon, name, trust, hostname, IP, and available MAC
+  address. Missing MAC information is shown as unavailable. The bar's Open Device
+  button opens the same device in the Devices tab, or the
+  first detected device when none has been selected. It is disabled before devices
+  are detected. Dashboard panel visibility is preserved when switching tabs.
 - Devices provides a scrollable list with search and All/Trusted/Review/Flagged
   filters. Selecting a device updates its inline profile, editable name and trust,
   measured ping results, and device-specific recent activity. Run ping test sends
@@ -126,7 +133,11 @@ rendered administrator data from the page before another account can sign in.
   physical switch, router, Wi-Fi attachment, or device-to-device topology. The
   central node represents the local subnet, without inventing physical links.
 - Use Test connection in a profile outside the Dashboard, or the Tests screen
-  with 4, 10, or 20 requests.
+  with 4, 10, or 20 requests. Tests also offers a per-request timeout of 1, 2,
+  or 5 seconds, defaulting to 2 seconds. Existing profile tests retain a
+  1-second timeout. The Tests screen shows individual response pills, a line
+  chart comparing the selected device's latest three tests, and measured sent,
+  received, loss, average, and maximum values. Timeout replies leave chart gaps.
   This calls the desktop `ConnectivityService.test_connection()` implementation.
   Ping metrics stay blank until an actual test completes. Latest Average Latency
   and Packet Loss aggregate the latest saved replies for currently detected
@@ -136,8 +147,21 @@ rendered administrator data from the page before another account can sign in.
   The browser polls for updates without blocking. Failures restore controls and
   retain the last successful results. No-response devices may be asleep or block
   ICMP; absence from a scan does not prove disconnection.
-- History shows saved scan timestamps/counts and recent activity. Reports shows
-  the latest snapshot and downloads a plain-text report from measured data.
+- History shows saved scan timestamps/counts and recent activity. Reports offers
+  device and scan selectors, measured summary cards, a reply-latency line chart,
+  reply/timeout counts, device information, and individual packet results. Select
+  from the latest 30 saved scans, including devices absent from the current scan.
+  Tests belong to the interval from the selected scan until the next scan; device
+  details use current saved values. Charts compare up to three tests, while the
+  packet table includes all retained tests in that interval. The Sent card counts
+  packets across those tests; Tested counts completed tests. Packet error codes
+  are unavailable and display an em dash.
+  Export PDF opens the browser print dialog; choose Save as PDF. The print layout
+  includes every packet row and omits application navigation and controls.
+  A plain-text download is also available.
+  Add to Report on the Tests screen attaches a copy of the selected test to
+  that report. Added tests remain available until reload or sign-out; download
+  the report to keep them. Running another test does not change an added copy.
   This does not use or complete the desktop reporting service stub.
 - Settings controls background/map motion locally. System reduced-motion settings
   take priority. Access retains the existing administrator account controls.
@@ -153,8 +177,9 @@ The interface only shows devices in the latest successful scan.
 | `GET /api/network` | Any signed-in account; basic device and ping results, without admin metadata |
 | `GET /api/admin/dashboard` | Admin only; full map, recognition, activity, metrics, and history |
 | `GET /api/admin/devices/{id}` | Admin only; complete saved device details, its latest 20 activities and three ping tests |
+| `GET /api/admin/reports/{scan_id}` | Admin only; saved scan membership and retained ping tests from that scan until the next scan |
 | `POST /api/network/scan` | User/admin; no client-supplied subnet or command |
-| `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan and `count` 4/10/20 |
+| `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan, `count` 4/10/20, and optional `timeout_seconds` 1/2/5 (defaults to 1) |
 | `POST /api/devices/{id}` | Admin; `label` and/or `trust` (`trusted`, `review`, `flagged`) |
 
 Device mutations also require the existing Origin and CSRF checks. New tables
@@ -187,6 +212,10 @@ not scan the real network or create accounts in your application database.
 `tests/test_dashboard.py` additionally checks scan integration, subnet membership,
 trust/label persistence and scope, guest/user restrictions, measured ping results,
 timeouts, invalid targets, serialized operations, failed scans, and empty results.
+Report checks cover historical membership, inclusive/exclusive scan boundaries,
+UTC offsets, complete retained test history, empty scans, and administrator access.
+`tests/test_connectivity.py` verifies the selected timeout passed to Windows ping,
+the default timeout, and rejection of unsupported timeout values.
 
 ## Original desktop interface
 

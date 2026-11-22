@@ -94,9 +94,11 @@ class WebServer(ThreadingHTTPServer):
                 self.network = self.network | {"busy": False, "operation": None, "error": "Could not start discovery. Please try again."}
             raise AuthError("Could not start discovery. Please try again.", 503) from None
 
-    def start_ping(self, identifier, count, actor):
+    def start_ping(self, identifier, count, actor, timeout_seconds=None):
         if type(count) is not int or count not in (4, 10, 20):
             raise AuthError("Ping count must be 4, 10, or 20.")
+        if timeout_seconds is not None and (type(timeout_seconds) is not int or timeout_seconds not in (1, 2, 5)):
+            raise AuthError("Ping timeout must be 1, 2, or 5 seconds.")
         with self.lock:
             if self.network["busy"]:
                 raise AuthError("A network operation is already running. Please wait.", 409)
@@ -107,7 +109,8 @@ class WebServer(ThreadingHTTPServer):
 
         def ping():
             try:
-                result = self.connectivity.test_connection(Device(device["ip_address"], device["hostname"]), count)
+                options = {} if timeout_seconds is None else {"timeout_seconds": timeout_seconds}
+                result = self.connectivity.test_connection(Device(device["ip_address"], device["hostname"]), count, **options)
                 if result.ip_address != device["ip_address"]:
                     raise ValueError("Ping service returned a result for a different device.")
                 with self.lock:
@@ -228,6 +231,11 @@ class Handler(BaseHTTPRequestHandler):
                 if user["role"] != "admin":
                     raise AuthError("Administrator access is required for device details.", 403)
                 self.send(200, {"device": self.server.dashboard.device_detail(int(path.rsplit("/", 1)[1]))})
+            elif re.fullmatch(r"/api/admin/reports/\d+", path):
+                user, _, _ = self.require("dashboard.view")
+                if user["role"] != "admin":
+                    raise AuthError("Administrator access is required for reports.", 403)
+                self.send(200, {"report": self.server.dashboard.scan_report(int(path.rsplit("/", 1)[1]))})
             elif path == "/api/admin/users":
                 self.require("users.manage")
                 self.send(200, {"users": self.server.auth.list_users()})
@@ -246,7 +254,8 @@ class Handler(BaseHTTPRequestHandler):
     def static(self, path):
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"),
                  "/styles.css": ("styles.css", "text/css"), "/app.js": ("app.js", "text/javascript"),
-                 "/dashboard.css": ("dashboard.css", "text/css"), "/dashboard.js": ("dashboard.js", "text/javascript")}
+                 "/dashboard.css": ("dashboard.css", "text/css"), "/dashboard.js": ("dashboard.js", "text/javascript"),
+                 "/reports.js": ("reports.js", "text/javascript")}
         if path in files:
             filename, mime = files[path]
             target = ROOT / "web" / filename
@@ -292,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(202, {"ok": True})
         elif re.fullmatch(r"/api/devices/\d+/ping", path):
             actor, _, _ = self.require("network.test", mutation=True)
-            self.server.start_ping(int(path.split("/")[3]), data.get("count", 4), actor["username"])
+            self.server.start_ping(int(path.split("/")[3]), data.get("count", 4), actor["username"], data.get("timeout_seconds"))
             self.send(202, {"ok": True})
         elif re.fullmatch(r"/api/devices/\d+", path):
             actor, _, _ = self.require("devices.manage", mutation=True)

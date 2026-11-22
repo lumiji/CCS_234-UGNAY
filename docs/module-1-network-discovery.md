@@ -52,9 +52,9 @@ Module 3; those services remain stubs in this version.
 | Operating system | Windows for the current discovery implementation. |
 | Python | Python 3.10 or newer; the earlier verified environment used Python 3.14.0. |
 | GUI | Tkinter and a graphical desktop session. |
-| Adapter detection | Windows PowerShell, available as `powershell.exe`, with NetTCPIP. |
-| ICMP backend | `System.Net.NetworkInformation.Ping` through Windows PowerShell. |
-| Permissions | Permission to execute PowerShell and read local adapter/CIM configuration. |
+| Adapter detection | Native Windows IP Helper APIs through an isolated Python helper. |
+| ICMP backend | Native Windows `IcmpSendEcho` through an isolated Python helper. |
+| Permissions | Permission to execute Python and read native local adapter configuration. |
 | Network | A connected IPv4 interface; internet access is not required for detection. |
 | Dependencies | Python standard library and Windows components; no pip packages. |
 
@@ -139,7 +139,7 @@ raise exceptions. The UI owns widgets, dialogs, selection, and display formattin
 flowchart LR
     Entry[main.py] --> UI[UgnayApp]
     UI -->|background service calls| Service[DiscoveryService]
-    Service --> Windows[PowerShell and Windows ICMP]
+    Service --> Windows[Native Windows IP Helper and ICMP]
     Service --> Resolver[Python resolver subprocess]
     Windows --> Service
     Resolver --> Service
@@ -187,26 +187,25 @@ workers. This design follows the need to keep long-running work outside
 
 ### 6.1 Reading Windows configuration
 
-`detect_network()` clears its cached network and runs `_NETWORK_QUERY` using
-`powershell.exe -NoLogo -NoProfile -NonInteractive -Command ...`.
+`detect_network()` clears its cached network and runs `windows_network.py` using
+`python -I -X utf8`. The helper reads the native Windows IP Helper APIs through
+`ctypes`, avoiding PowerShell startup and slow or restricted CIM/WMI providers.
+The subprocess still has a 20-second deadline so a stalled OS call can be killed.
 
-The query enumerates `Get-NetIPConfiguration -All`, skips unsuitable adapters,
-and reads active IPv4 address records with:
+`GetAdaptersAddresses(AF_INET, ...)` enumerates IPv4 adapters and their metrics.
+`GetIfEntry2` supplies the physical-interface flag and current connection status.
+`GetUnicastIpAddressEntry` supplies the actual prefix, address state, and
+`SkipAsSource` value. Native buffer growth is retried up to three times, and an
+adapter or address removed during enumeration is skipped.
 
-```powershell
-# Inside the query's loop over connected configurations:
-Get-NetIPAddress -InterfaceIndex $config.InterfaceIndex -AddressFamily IPv4 -PolicyStore ActiveStore
-```
+The helper exchanges plain JSON fields: alias, index, interface type, hardware
+flag, status, metric, address, prefix, address state, and `SkipAsSource`. Native
+errors fail detection rather than publishing guessed configuration.
 
-`$config.InterfaceIndex` represents the current candidate's interface index. The
-implementation queries connected candidates before Python chooses the best
-usable record. It exchanges plain JSON fields, including alias, index, interface
-type, hardware flag, status, metric, address, prefix, address state, and
-`SkipAsSource`.
-
-The commands expose configuration and prefix information documented by Microsoft:
-[Get-NetIPConfiguration](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipconfiguration)
-and [Get-NetIPAddress](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipaddress).
+The APIs are documented by Microsoft:
+[GetAdaptersAddresses](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses),
+[GetIfEntry2](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getifentry2),
+and [GetUnicastIpAddressEntry](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getunicastipaddressentry).
 
 ### 6.2 Eligibility and selection
 
@@ -218,7 +217,7 @@ Malformed configuration data raises a detection error.
 When `interface_alias` is supplied, it is matched literally, ignoring case.
 The requested interface must be connected and have an eligible IPv4 address;
 detection does not fall back to another alias. The alias is compared in Python
-and is never interpolated into a PowerShell command.
+and is never interpolated into a shell command.
 
 Without an explicit alias, candidates are ranked lexicographically:
 
@@ -292,8 +291,8 @@ buffer covers both 32/64-bit reply layouts; only the fixed address/status header
 is read. It never dereferences native reply pointers. See the
 [Microsoft API reference](https://learn.microsoft.com/en-us/windows/win32/api/icmpapi/nf-icmpapi-icmpsendecho).
 
-PowerShell is used once for network adapter detection. Starting it for each
-candidate previously created enough startup load to exceed probe deadlines.
+Discovery no longer starts PowerShell, including for adapter detection. Starting
+it for each candidate previously created enough startup load to exceed probe deadlines.
 The replacement uses eight workers by default and a 15-second helper deadline.
 A helper process timeout triggers one fresh retry after `subprocess.run` has
 terminated/reaped the previous process. A second timeout raises an actionable
@@ -619,8 +618,8 @@ one environment, not guaranteed device counts or timing limits for other LANs.
 
 | Symptom | Checks and corrective action |
 | --- | --- |
-| `powershell.exe` not found | Check the Windows PowerShell installation and `Get-Command powershell.exe`. The implementation does not substitute `pwsh` automatically. |
-| Network detection failed | Run `Get-NetIPConfiguration -All` under the same account; inspect adapter connection and local policy/CIM access. Sandboxed execution can restrict these reads. |
+| Helper process could not start | Check that the Python executable and helper files are present and permitted to run. PowerShell and NetTCPIP are not required. |
+| Network detection failed | Run `python -I -X utf8 ugnay/windows_network.py` under the same account; inspect the native API error and adapter connection. Restart the application after updating an installation that used the previous PowerShell/CIM detector. |
 | Wrong adapter selected | Inspect interface aliases and metrics; inject `DiscoveryService(interface_alias="...")` for the intended connected interface. |
 | Subnet rejected as too large | Review the reported candidate count. Choose an explicit smaller range through the API, or deliberately configure `max_hosts`. The GUI has no custom-subnet input. |
 | Isolated link-local network detected but scan rejected | A typical link-local `/16` exceeds the default host limit; detection eligibility and scan-size limits are separate. |
@@ -663,6 +662,5 @@ maintain the regression suite alongside service changes. Recheck repeated scans,
 interface selection, empty results, and retained UI state after failures.
 
 Potential future work includes a bounded scan-cancellation mechanism, a visible
-interface/range selector, ARP-assisted discovery, and a probe backend that avoids
-starting PowerShell for every candidate. These are future extensions, not current
-capabilities.
+interface/range selector, and ARP-assisted discovery. These are future extensions,
+not current capabilities.

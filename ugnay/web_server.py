@@ -223,6 +223,11 @@ class Handler(BaseHTTPRequestHandler):
                 with self.server.lock:
                     state = self.server.network.copy()
                 self.send(200, state)
+            elif re.fullmatch(r"/api/admin/devices/\d+", path):
+                user, _, _ = self.require("dashboard.view")
+                if user["role"] != "admin":
+                    raise AuthError("Administrator access is required for device details.", 403)
+                self.send(200, {"device": self.server.dashboard.device_detail(int(path.rsplit("/", 1)[1]))})
             elif path == "/api/admin/users":
                 self.require("users.manage")
                 self.send(200, {"users": self.server.auth.list_users()})

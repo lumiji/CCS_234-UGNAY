@@ -100,6 +100,19 @@ class DashboardStore:
                 raise AuthError("Device not found. Run a discovery scan first.", 404)
             return self._device(db, row)
 
+    def device_detail(self, identifier):
+        """Recent history for one device, independent of the global feed limits."""
+        with self.auth.connect() as db:
+            row = db.execute("SELECT * FROM discovered_devices WHERE id=?", (identifier,)).fetchone()
+            if not row:
+                raise AuthError("Device not found.", 404)
+            device = self._device(db, row)
+            device["activities"] = [dict(item) for item in db.execute(
+                "SELECT * FROM network_activity WHERE device_id=? ORDER BY id DESC LIMIT 20", (identifier,))]
+            device["ping_history"] = [{"id": item["id"], **json.loads(item["result"])} for item in db.execute(
+                "SELECT id,result FROM device_ping_tests WHERE device_id=? ORDER BY id DESC LIMIT 3", (identifier,))]
+        return device
+
     def update_device(self, identifier, changes, actor):
         if not changes or set(changes) - {"label", "trust"}:
             raise AuthError("Choose a device label or trust status.")

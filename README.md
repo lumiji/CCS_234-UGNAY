@@ -89,15 +89,32 @@ rendered administrator data from the page before another account can sign in.
 ### Dashboard and device recognition
 
 - The Dashboard is a read-only overview. Scan network and View Reports are its
-  action buttons. Hide collapses the device list and activity feed while keeping
+  action buttons. The map includes a trust legend, zoom in/out, and Fit controls
+  in its upper-right corner. Hide collapses the device list and activity feed while keeping
   latency, packet loss, and View Reports visible; Show restores the details.
+  The map viewport extends to the dashboard's bottom behind the lower board, so
+  zoomed nodes remain visible in the space revealed when the board is hidden.
 - Select a map node or device row to open a compact profile popup. Escape, the
   close button, or a click outside dismisses it. The central network node opens
   subnet details. Dashboard profiles have no editing or ping controls.
-- In Network Map, drag to pan. Use +/minus/Fit to zoom, or Ctrl+mouse wheel. Larger scans
+- In Dashboard or Network Map, use +/minus/Fit to zoom, or Ctrl+mouse wheel.
+  Zoom in on the Dashboard, then drag the map to pan with a mouse or touch.
+  Network Map also supports dragging. Fit restores the original position and zoom.
+  Larger scans
   use map pages (eight devices per page on desktop, four on mobile) to keep labels
   readable. The Devices tab provides search and the full list; the Dashboard
   previews up to four devices.
+- Devices provides a scrollable list with search and All/Trusted/Review/Flagged
+  filters. Selecting a device updates its inline profile, editable name and trust,
+  measured ping results, and device-specific recent activity. Run ping test sends
+  four requests to the selected device. The Reply Latency graph compares its latest
+  three saved tests by request number, leaving gaps for timeouts. Untested devices
+  show an empty graph until a test runs. Background refreshes preserve unsaved edits.
+- Device details include detected hostname, subnet, IP, first discovery, last scan
+  response, and latest ping metrics. Device type and MAC address are marked as
+  unavailable when discovery has not identified them. The device history endpoint
+  returns up to 20 activities and three tests for that device, independently of
+  the global dashboard feed.
 - Check means Trusted, warning means Review, and x means Flagged. Every newly
   discovered device starts in Review. Administrators can edit its label and trust
   in profiles opened from Devices or Security. These decisions persist across
@@ -135,6 +152,7 @@ The interface only shows devices in the latest successful scan.
 | --- | --- |
 | `GET /api/network` | Any signed-in account; basic device and ping results, without admin metadata |
 | `GET /api/admin/dashboard` | Admin only; full map, recognition, activity, metrics, and history |
+| `GET /api/admin/devices/{id}` | Admin only; complete saved device details, its latest 20 activities and three ping tests |
 | `POST /api/network/scan` | User/admin; no client-supplied subnet or command |
 | `POST /api/devices/{id}/ping` | User/admin; a device in the latest scan and `count` 4/10/20 |
 | `POST /api/devices/{id}` | Admin; `label` and/or `trust` (`trusted`, `review`, `flagged`) |
@@ -295,10 +313,11 @@ encounters a backend failure does not publish partial results as a successful sc
 
 #### Local IP and subnet detection
 
-Detection requires Windows PowerShell (`powershell.exe`) and its NetTCPIP module.
-It reads `Get-NetIPConfiguration -All`, queries connected interfaces with
-`Get-NetIPAddress -AddressFamily IPv4 -PolicyStore ActiveStore`, and parses plain
-JSON fields. Python's `ipaddress` computes the subnet from the actual prefix;
+Detection reads Windows' native IP Helper APIs through an isolated Python helper
+(`ugnay/windows_network.py`). It does not start PowerShell or query CIM/WMI.
+`GetAdaptersAddresses`, `GetIfEntry2`, and `GetUnicastIpAddressEntry` provide the
+adapter status, physical-interface flag, metric, address state, source eligibility,
+and real IPv4 prefix as JSON. Python's `ipaddress` computes the subnet from that prefix;
 for example, `192.168.1.24/26` returns `192.168.1.0/26`.
 
 The selection rule is deterministic:
@@ -325,16 +344,17 @@ print(network.local_ip, network.subnet)
 Omit `interface_alias` for automatic selection. An explicitly requested interface
 must be connected and have a usable IPv4 address; detection does not silently
 switch to another interface. The alias is matched in Python, never interpolated
-into a PowerShell command. Each call reads fresh adapter data.
+into a shell command. Each call reads fresh adapter data.
 
-Detection raises `NetworkDetectionError` for unsupported platforms, unavailable
-PowerShell, command failures (including permission errors), a 20-second command
+Detection raises `NetworkDetectionError` for unsupported platforms, native API
+or helper failures (including permission errors), a 20-second helper
 timeout, malformed output, or no usable interface. The existing UI error handling
 can display these errors while retaining previous scan results.
 
-The commands and prefix information follow Microsoft's
-[Get-NetIPConfiguration documentation](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipconfiguration)
-and [Get-NetIPAddress documentation](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netipaddress).
+The adapter and address information follow Microsoft's
+[GetAdaptersAddresses documentation](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses),
+[GetIfEntry2 documentation](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getifentry2),
+and [GetUnicastIpAddressEntry documentation](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getunicastipaddressentry).
 
 #### Device discovery
 
@@ -346,7 +366,7 @@ including the local machine, is included only if it responds to an ICMP echo.
 
 A bounded thread pool runs lightweight, isolated Python helpers from
 `ugnay/icmp_probe.py`, calling Windows' native `IcmpSendEcho` API through `ctypes`.
-PowerShell runs once for adapter detection, rather than once for every address.
+Adapter detection also uses a native Python helper; discovery does not start PowerShell.
 Each probe exchanges JSON over stdin and stdout. Only a success status
 (numeric value `0`) from the requested address
 counts as a response; ICMP timeouts and unreachable statuses are ordinary misses.
@@ -386,7 +406,7 @@ The process timeout must exceed the ICMP timeout by at least one second. The
 default host limit allows up to 1,024 candidates; an oversized range raises
 `ValueError` with its host count and configured limit. This prevents enumerating
 an unexpectedly large LAN. At most eight probe/lookup tasks run concurrently by
-default, avoiding the startup load of many simultaneous PowerShell processes.
+default, limiting simultaneous interpreter and native probe startup.
 The 15-second helper deadline is separate from the one-second ICMP reply timeout.
 
 The scan reuses the last successful detection on the same service instance. If

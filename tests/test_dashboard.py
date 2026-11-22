@@ -250,6 +250,44 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("topology", dashboard)
         self.assertIn("trust", dashboard["devices"][0])
 
+    def test_device_details_include_only_selected_device_history(self):
+        first, second = self.scan()["devices"]
+        self.request(f"/api/devices/{first['id']}", {"label": "Selected workstation"})
+        self.request(f"/api/devices/{second['id']}", {"trust": "trusted"})
+        self.request(f"/api/devices/{first['id']}/ping", {"count": 4})
+        self.idle()
+        # Global feed retention must not hide this device's own recent history.
+        for index in range(55):
+            self.server.dashboard.activity("unrelated", f"Other activity {index}", "Test", second["id"])
+        status, response = self.request(f"/api/admin/devices/{first['id']}")
+        self.assertEqual(status, 200)
+        device = response["device"]
+        self.assertEqual(device["label"], "Selected workstation")
+        self.assertTrue(device["activities"])
+        self.assertTrue(all(activity["device_id"] == first["id"] for activity in device["activities"]))
+        self.assertEqual({activity["kind"] for activity in device["activities"]}, {"device_new", "device_label", "ping_completed"})
+        self.assertEqual(len(device["ping_history"]), 1)
+        self.assertIsNone(device["ping_history"][0]["replies"][2]["latency_ms"])
+
+    def test_device_detail_is_admin_only_and_rejects_unknown_devices(self):
+        device = self.scan()["devices"][0]
+        for role in ("guest", "user"):
+            self.assertEqual(self.request(f"/api/admin/devices/{device['id']}", role=role)[0], 403)
+        self.assertEqual(self.request("/api/admin/devices/99999")[0], 404)
+
+    def test_device_detail_bounds_and_orders_history(self):
+        device = self.scan()["devices"][0]
+        result = self.connectivity.test_connection(Device(device["ip_address"]), 4)
+        for _ in range(5):
+            self.server.dashboard.save_ping(device["id"], result, "Test")
+        for index in range(25):
+            self.server.dashboard.activity("device_note", f"Device event {index}", "Test", device["id"])
+        detail = self.request(f"/api/admin/devices/{device['id']}")[1]["device"]
+        self.assertEqual(len(detail["activities"]), 20)
+        self.assertEqual(detail["activities"][0]["message"], "Device event 24")
+        self.assertEqual(len(detail["ping_history"]), 3)
+        self.assertEqual([test["id"] for test in detail["ping_history"]], sorted((test["id"] for test in detail["ping_history"]), reverse=True))
+
     def test_basic_network_view_excludes_admin_data(self):
         device = self.scan()["devices"][0]
         self.request(f"/api/devices/{device['id']}", {"label": "Private admin label", "trust": "flagged"})
@@ -268,6 +306,7 @@ class DashboardTests(unittest.TestCase):
             db.execute("INSERT INTO role_permissions VALUES ('user','dashboard.view')")
         try:
             self.assertEqual(self.request("/api/admin/dashboard", role="user")[0], 403)
+            self.assertEqual(self.request("/api/admin/devices/1", role="user")[0], 403)
         finally:
             with self.auth.connect() as db:
                 db.execute("DELETE FROM role_permissions WHERE role='user' AND permission='dashboard.view'")

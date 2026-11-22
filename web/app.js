@@ -119,34 +119,89 @@ async function showWorkspace(session) {
   document.body.classList.add("authenticated");
   document.body.classList.toggle("member-view", !admin);
   document.title = "Your network · UGNAY";
-  if (!admin) {
+   if (!admin) {
     UgnayDashboard.reset();
-    $("member-welcome").textContent = guest ? "Welcome, guest." : `Hello, ${user.username}.`;
-    $("member-role").textContent = guest ? "Guest" : "User";
-    $("member-description").textContent = guest ? "View the latest network results." : "Discover and test connections on your local network.";
+
+    const pending = user.status === "pending";
+    const networkPanel = $("member-network-title").closest("section");
+
+    networkPanel.hidden = pending;
+    $("member-session").hidden = pending;
+    $("member-signup").hidden = !guest;
     $("member-scan").hidden = !user.permissions.includes("network.scan");
     $("member-test-heading").hidden = !user.permissions.includes("network.test");
-    $("member-signup").hidden = !guest;
-    $("member-session").textContent = `Session expires ${new Date(session.expires_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     message("member-message");
+
+    if (pending) {
+      document.title = "Pending approval · UGNAY";
+      $("member-welcome").textContent = "Awaiting approval";
+      $("member-role").textContent = "Pending";
+      $("member-description").textContent =
+        "Your account is awaiting administrator approval. Once approved, log in again.";
+      return;
+    }
+
+    $("member-welcome").textContent = guest
+      ? "Welcome, guest."
+      : `Hello, ${user.username}.`;
+    $("member-role").textContent = guest ? "Guest" : "User";
+    $("member-description").textContent = guest
+      ? "View the latest network results."
+      : "Discover and test connections on your local network.";
+
+    const expiresAt = new Date(session.expires_at * 1000);
+    $("member-session").textContent = `Session expires ${expiresAt.toLocaleString(
+      [],
+      { dateStyle: "medium", timeStyle: "short" }
+    )}`;
+
     await loadNetwork();
     return;
   }
-  $("welcome-name").textContent = guest ? "Guest" : user.username;
+
+  $("welcome-name").textContent = user.username;
   $("role-badge").textContent = user.role;
-  $("account-email").textContent = user.email || "Temporary guest account";
-  $("session-expiry").textContent = new Date(session.expires_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-  $("permissions-list").replaceChildren(...user.permissions.map((permission) => {
-    const li = document.createElement("li"); li.textContent = permissionNames[permission] || permission; return li;
-  }));
+  $("account-email").textContent = user.email;
+  $("session-expiry").textContent = new Date(
+    session.expires_at * 1000
+  ).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+  $("permissions-list").replaceChildren(
+    ...user.permissions.map((permission) => {
+      const li = document.createElement("li");
+      li.textContent = permissionNames[permission] || permission;
+      return li;
+    })
+  );
+
   const canScan = user.permissions.includes("network.scan");
+  const canManageUsers = user.permissions.includes("users.manage");
+
   $("scan").hidden = !canScan;
-  $("access-description").textContent = canScan ? "Discover responding devices on this computer’s local network." : "You have read-only access to the latest discovery results. Sign up to run a scan.";
-  $("guest-note").hidden = $("guest-signup").hidden = !guest;
-  $("admin-panel").hidden = !user.permissions.includes("users.manage");
-  message("workspace-message"); message("admin-message");
-  UgnayDashboard.mount({ session, api, loadUsers, refresh: async () => { clearTimeout(state.polling); await loadNetwork(); } });
-  await Promise.all([loadNetwork(), user.permissions.includes("users.manage") ? loadUsers() : Promise.resolve()]);
+  $("access-description").textContent = canScan
+    ? "Discover responding devices on this computer’s local network."
+    : "You have read-only access to the latest discovery results.";
+  $("guest-note").hidden = true;
+  $("guest-signup").hidden = true;
+  $("admin-panel").hidden = !canManageUsers;
+
+  message("workspace-message");
+  message("admin-message");
+
+  UgnayDashboard.mount({
+    session,
+    api,
+    loadUsers,
+    refresh: async () => {
+      clearTimeout(state.polling);
+      await loadNetwork();
+    },
+  });
+
+  await Promise.all([
+    loadNetwork(),
+    canManageUsers ? loadUsers() : Promise.resolve(),
+  ]);
 }
 
 async function loadNetwork() {
@@ -203,32 +258,115 @@ async function updateUser(id, changes) {
 async function loadUsers() {
   const session = state.session;
   if (!session?.user.permissions.includes("users.manage")) return;
+
+  const statusLabels = {
+    pending: "Pending",
+    approved: "Approved",
+    disabled: "Disabled",
+    guest: "Temporary guest",
+  };
+
   try {
     const { users } = await api("/api/admin/users");
     if (state.session !== session) return;
-    $("user-rows").replaceChildren(...users.map((user) => {
-      const tr = document.createElement("tr"), name = document.createElement("td"), email = document.createElement("small");
-      name.textContent = user.username; email.textContent = user.email || "Temporary guest"; name.append(email);
-      const role = document.createElement("td"), select = document.createElement("select");
+
+    const pending = users.filter((user) => user.status === "pending");
+    const others = users.filter((user) => user.status !== "pending");
+    const rows = [];
+
+    for (const user of [...pending, ...others]) {
+      const row = document.createElement("tr");
+      const isSelf = user.id === session.user.id;
+      const isGuest = user.role === "guest";
+
+      const nameCell = document.createElement("td");
+      nameCell.textContent = user.username;
+      const email = document.createElement("small");
+      email.textContent = user.email || "Temporary guest";
+      nameCell.append(email);
+
+      const roleCell = document.createElement("td");
+      const select = document.createElement("select");
       select.setAttribute("aria-label", `Role for ${user.username}`);
-      (user.role === "guest" ? ["guest"] : ["user", "admin"]).forEach((value) => { const option = document.createElement("option"); option.value = value; option.textContent = value[0].toUpperCase() + value.slice(1); select.append(option); });
-      select.value = user.role; select.disabled = user.id === session.user.id || user.role === "guest";
-      select.addEventListener("change", async () => { select.disabled = true; await updateUser(user.id, { role: select.value }); });
-      role.append(select);
-      const status = document.createElement("td"); status.textContent = user.active ? "Active" : "Disabled";
-      const actions = document.createElement("td"), wrapper = document.createElement("div"); wrapper.className = "table-actions";
-      const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "secondary-button"; toggle.textContent = user.active ? "Disable" : "Enable"; toggle.disabled = user.id === session.user.id;
-      toggle.setAttribute("aria-label", `${toggle.textContent} ${user.username}`);
-      toggle.addEventListener("click", async () => { toggle.disabled = true; await updateUser(user.id, { active: !user.active }); });
-      wrapper.append(toggle);
-      if (user.role !== "guest") {
-        const reset = document.createElement("button"); reset.type = "button"; reset.className = "secondary-button"; reset.textContent = "Reset password";
-        reset.addEventListener("click", () => { state.resetUser = user.id; $("reset-title").textContent = `Reset password for ${user.username}`; $("reset-form").reset(); message("reset-message"); $("reset-dialog").showModal(); });
-        wrapper.append(reset);
+
+      const roles = isGuest ? ["guest"] : ["user", "admin"];
+      for (const value of roles) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value[0].toUpperCase() + value.slice(1);
+        select.append(option);
       }
-      actions.append(wrapper); tr.append(name, role, status, actions); return tr;
-    }));
-  } catch (error) { message("admin-message", error.message); }
+
+      select.value = user.role;
+      select.disabled = isSelf || isGuest || user.status !== "approved";
+      select.addEventListener("change", async () => {
+        select.disabled = true;
+        await updateUser(user.id, { role: select.value });
+      });
+      roleCell.append(select);
+
+      const statusCell = document.createElement("td");
+      statusCell.textContent = statusLabels[user.status] ?? "Unknown";
+
+      const actionsCell = document.createElement("td");
+      const actions = document.createElement("div");
+      actions.className = "table-actions";
+
+      if (user.status === "pending" && user.role === "user") {
+        const approve = document.createElement("button");
+        approve.type = "button";
+        approve.className = "primary-button";
+        approve.textContent = "Approve";
+        approve.setAttribute("aria-label", `Approve ${user.username}`);
+        approve.addEventListener("click", async () => {
+          approve.disabled = true;
+          try {
+            await updateUser(user.id, { approved: true });
+          } finally {
+            approve.disabled = false;
+          }
+        });
+        actions.append(approve);
+      }
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "secondary-button";
+      toggle.textContent = user.active ? "Disable" : "Enable";
+      toggle.disabled = isSelf;
+      toggle.setAttribute("aria-label", `${toggle.textContent} ${user.username}`);
+      toggle.addEventListener("click", async () => {
+        toggle.disabled = true;
+        await updateUser(user.id, { active: !user.active });
+      });
+      actions.append(toggle);
+
+      if (!isGuest) {
+        const reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "secondary-button";
+        reset.textContent = "Reset password";
+        reset.addEventListener("click", () => {
+          state.resetUser = user.id;
+          $("reset-title").textContent = `Reset password for ${user.username}`;
+          $("reset-form").reset();
+          message("reset-message");
+          $("reset-dialog").showModal();
+        });
+        actions.append(reset);
+      }
+
+      actionsCell.append(actions);
+      row.append(nameCell, roleCell, statusCell, actionsCell);
+      rows.push(row);
+    }
+
+    $("user-rows").replaceChildren(...rows);
+  } catch (error) {
+    if (state.session === session) {
+      message("admin-message", error.message);
+    }
+  }
 }
 
 $("auth-form").addEventListener("submit", async (event) => {

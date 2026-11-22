@@ -7,7 +7,7 @@ window.UgnayDashboard = (() => {
   const trustNames = { trusted: "Trusted", review: "Review", flagged: "Flagged" };
   const trustSymbols = { trusted: "✓", review: "!", flagged: "×" };
   const trustColors = { trusted: "#a9df82", review: "#dca52f", flagged: "#c12949" };
-  let context, data, initialized = false, selected = null, pinned = false, closeTimer;
+  let context, data, initialized = false, selected = null;
   let currentView = "dashboard", collapsed = false, lastFingerprint = "", mapPage = 0;
   let box = { x: 0, y: 0, width: 1000, height: 430 }, drag = null;
   let motionEnabled = true;
@@ -37,8 +37,9 @@ window.UgnayDashboard = (() => {
   const loss = (value) => value == null ? "—" : `${Number(value.toFixed(1))}%`;
   const initials = (value) => value.split(/[\s_.-]+/).filter(Boolean).slice(0, 2).map((word) => [...word][0]).join("").toUpperCase() || "?";
   const currentDevice = () => data?.devices.find((device) => device.id === selected);
+  const canEditDevice = () => ["devices", "security"].includes(currentView) && can("devices.manage");
   const filteredDevices = () => {
-    const query = byId("device-search").value.trim().toLowerCase();
+    const query = currentView === "dashboard" ? "" : byId("device-search").value.trim().toLowerCase();
     return (data?.devices || []).filter((device) => `${device.name} ${device.hostname || ""} ${device.ip_address}`.toLowerCase().includes(query));
   };
 
@@ -56,6 +57,13 @@ window.UgnayDashboard = (() => {
     if (context?.session.user.role !== "admin") return;
     if (view === "access" && !can("users.manage")) return;
     currentView = view;
+    byId("workspace").dataset.view = view;
+    byId("device-search").hidden = view !== "devices";
+    document.querySelector(".map-toolbar").hidden = view === "dashboard";
+    byId("map-disclosure").hidden = view === "dashboard";
+    byId("map-description").textContent = view === "dashboard"
+      ? "Devices are linked to the scanned subnet. Select a node to view its read-only profile."
+      : "Devices are linked to the scanned subnet. Select a node for its profile. Drag to pan; use the zoom controls to explore.";
     document.querySelectorAll("[data-view]").forEach((button) => {
       const active = button.dataset.view === view;
       button.classList.toggle("active", active);
@@ -69,14 +77,17 @@ window.UgnayDashboard = (() => {
     byId("board-toggle").hidden = view === "devices";
     applyBoard(view === "devices" ? false : view === "map" ? true : collapsed);
     closeProfile();
+    mapPage = 0; fit();
+    if (data) { renderMap(); renderDevices(); renderActivities(); }
     document.title = `${view === "map" ? "Network Map" : view[0].toUpperCase() + view.slice(1)} · UGNAY`;
     if (view === "access") context.loadUsers();
   }
 
   function applyBoard(hide) {
-    byId("board-body").hidden = hide;
+    byId("board-device-details").hidden = hide;
+    byId("board-activity").hidden = hide;
     byId("device-board").classList.toggle("collapsed", hide);
-    byId("board-toggle").textContent = hide ? "Show devices" : "Hide";
+    byId("board-toggle").textContent = hide ? "Show" : "Hide";
     byId("board-toggle").setAttribute("aria-expanded", String(!hide));
   }
 
@@ -95,7 +106,6 @@ window.UgnayDashboard = (() => {
     byId("average-latency").textContent = latency(data.metrics.average_latency_ms);
     byId("packet-loss").textContent = loss(data.metrics.packet_loss_percent);
     byId("average-latency").title = `Latest tests for ${data.metrics.tested_devices} currently detected devices`;
-    byId("scan-time").textContent = data.scanned_at ? "Select a device to see its latest test." : "Start a scan to discover your network.";
     byId("run-test").disabled = !can("network.test") || data.busy || !data.devices.length;
     byId("profile-test").disabled = data.busy;
     byId("network-empty").hidden = !!data.network;
@@ -106,7 +116,7 @@ window.UgnayDashboard = (() => {
     lastFingerprint = fingerprint;
     renderMap(); renderDevices(); renderActivities(); renderTests(); renderHistory(); renderReport(); renderSecurity();
     if (selected !== null) {
-      if (currentDevice()) showProfile(selected, pinned, true); else closeProfile();
+      if (currentDevice() || (selected === "network" && data.network)) showProfile(selected, true); else closeProfile();
     }
   }
 
@@ -145,21 +155,19 @@ window.UgnayDashboard = (() => {
       group.append(svg("circle", { cx: badgeX, cy: 61, r: 8, fill: trustColors[device.trust] }));
       group.append(svg("text", { x: badgeX, y: 61, class: "node-symbol" }, trustSymbols[device.trust]));
       group.append(svg("text", { y: 85, class: "node-ip" }, device.ip_address));
-      group.addEventListener("mouseenter", () => { clearTimeout(closeTimer); if (!pinned) showProfile(device.id, false); });
-      group.addEventListener("mouseleave", scheduleClose);
-      group.addEventListener("focus", () => { if (!pinned) showProfile(device.id, false); });
-      group.addEventListener("blur", scheduleClose);
-      group.addEventListener("click", () => showProfile(device.id, true));
-      group.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); showProfile(device.id, true); } });
+      group.addEventListener("click", () => showProfile(device.id));
+      group.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); showProfile(device.id); } });
       graph.append(group);
     });
-    const hub = svg("g", { transform: `translate(${root.x} ${root.y})`, role: "img", "aria-label": `Scanned subnet ${data.network.subnet}. Lines indicate subnet membership.` });
+    const hub = svg("g", { class: `map-node${selected === "network" ? " selected" : ""}`, "data-node": "network", transform: `translate(${root.x} ${root.y})`, tabindex: "0", role: "button", "aria-label": `View scanned network ${data.network.subnet}. Lines indicate subnet membership.` });
     hub.append(svg("circle", { r: 49, class: "node-halo" }));
     [48, 39, 30].forEach((r) => hub.append(svg("circle", { r, class: "node-ring" })));
     hub.append(svg("circle", { r: 26, fill: "#fff", stroke: "#233a53", "stroke-width": 3 }));
     hub.append(svg("path", { d: "M-8-12H8V-3H-8ZM0-3V8M-13 8H13M-13 8V14M13 8V14M-17 14H-9M9 14H17", fill: "none", stroke: "#15283e", "stroke-width": 2.6, "stroke-linejoin": "round" }));
     hub.append(svg("text", { y: 66, class: "node-name" }, "Local network"));
     hub.append(svg("text", { y: 84, class: "node-ip" }, data.network.subnet));
+    hub.addEventListener("click", () => showProfile("network"));
+    hub.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); showProfile("network"); } });
     graph.append(hub);
     byId("map-graph").replaceChildren(graph);
     syncMotion();
@@ -172,7 +180,8 @@ window.UgnayDashboard = (() => {
     return node("span", type === "untested" ? "−  Not tested" : type === "responding" ? "✓  Responded" : type === "unreachable" ? "◷  No ping response" : "!  Packet loss", `ping-badge ${type}`);
   }
   function renderDevices() {
-    const devices = filteredDevices();
+    const devices = currentView === "dashboard" ? filteredDevices().slice(0, 4) : filteredDevices();
+    byId("scan-time").textContent = currentView === "dashboard" ? "Go to the Devices tab to see the full list." : data.scanned_at ? "Select a device to see its latest test." : "Start a scan to discover your network.";
     byId("devices-empty").hidden = devices.length > 0;
     byId("devices-empty").textContent = data.devices.length ? "No devices match your search." : data.scanned_at ? "No devices responded to the latest scan." : "No devices yet. Start a network scan.";
     byId("device-rows").replaceChildren(...devices.map((device) => {
@@ -181,8 +190,8 @@ window.UgnayDashboard = (() => {
       row.setAttribute("aria-label", `${device.name}, ${device.ip_address}, ${trustNames[device.trust]}`);
       const trust = node("td"), ping = node("td"); trust.append(trustBadge(device)); ping.append(pingBadge(device));
       row.append(node("td", device.name), node("td", device.ip_address), trust, ping);
-      row.addEventListener("click", () => showProfile(device.id, true));
-      row.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); showProfile(device.id, true); } });
+      row.addEventListener("click", () => showProfile(device.id));
+      row.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); showProfile(device.id); } });
       return row;
     }));
   }
@@ -195,53 +204,69 @@ window.UgnayDashboard = (() => {
     });
   }
   function renderActivities() {
-    byId("activity-list").replaceChildren(...activities(data.activities));
+    byId("activity-list").replaceChildren(...activities(currentView === "dashboard" ? data.activities.slice(0, 11) : data.activities));
     byId("activity-empty").hidden = data.activities.length > 0;
     byId("history-activity").replaceChildren(...activities(data.activities));
   }
 
-  function showProfile(identifier, pin, refresh = false) {
-    clearTimeout(closeTimer);
+  function showProfile(identifier, refresh = false) {
+    const network = identifier === "network" && data?.network;
     const device = data?.devices.find((item) => item.id === identifier);
-    if (!device) return;
+    if (!device && !network) return;
     const changed = selected !== identifier;
-    selected = identifier; pinned = pin;
+    selected = identifier;
     const pageSize = mobileMap.matches ? 4 : 8;
     const position = filteredDevices().findIndex((item) => item.id === identifier);
     if (position >= 0 && Math.floor(position / pageSize) !== mapPage) {
       mapPage = Math.floor(position / pageSize); renderMap();
     }
-    byId("device-profile").hidden = false;
-    byId("profile-name").textContent = device.name;
-    byId("profile-avatar").textContent = initials(device.name);
-    byId("profile-ip").textContent = device.ip_address;
-    byId("profile-trust").className = `trust-badge ${device.trust}`;
-    byId("profile-trust").textContent = `${trustSymbols[device.trust]} ${trustNames[device.trust]}`;
-    const facts = [["Detected hostname", device.hostname || "Hostname unavailable"], ["Connected subnet", device.subnet], ["First discovered", date(device.first_seen)], ["Last scan response", date(device.last_seen)], ["Average latency", latency(device.ping?.average_latency_ms)], ["Packet loss", loss(device.ping?.packet_loss_percent)], ["Last ping test", device.ping ? date(device.ping.tested_at) : "Not tested"]];
-    byId("profile-facts").replaceChildren(...facts.flatMap(([title, value]) => [node("dt", title), node("dd", value)]));
-    byId("device-edit-form").hidden = !can("devices.manage");
-    byId("profile-test").hidden = !can("network.test");
+    const profile = byId("device-profile");
+    profile.hidden = false;
+    byId("profile-name").textContent = network ? "Local network" : device.name;
+    byId("profile-avatar").replaceChildren(network ? Object.assign(node("img"), { src: "/assets/network-placeholder.svg", alt: "", width: 28, height: 28 }) : document.createTextNode(initials(device.name)));
+    byId("profile-ip").textContent = network ? network.local_ip : device.ip_address;
+    byId("profile-trust").hidden = !!network;
+    byId("profile-trust").className = network ? "trust-badge" : `trust-badge ${device.trust}`;
+    byId("profile-trust").textContent = network ? "" : trustNames[device.trust];
+    const facts = network
+      ? [["Network range", network.subnet], ["Network type", "Local subnet"], ["Devices detected", String(data.devices.length)], ["Average latency", latency(data.metrics.average_latency_ms)], ["Last scan", date(data.scanned_at)], ["Packet loss", loss(data.metrics.packet_loss_percent)]]
+      : [["Detected hostname", device.hostname || "Hostname unavailable"], ["Device type", "Network device"], ["Connected subnet", device.subnet], ["Average latency", latency(device.ping?.average_latency_ms)], ["First discovered", date(device.first_seen)], ["Packet loss", loss(device.ping?.packet_loss_percent)], ["Last scan response", date(device.last_seen)], ["Last ping test", device.ping ? date(device.ping.tested_at) : "Not tested"]];
+    byId("profile-facts").replaceChildren(...facts.map(([title, value]) => { const fact = node("div"); fact.append(node("dt", title), node("dd", value)); return fact; }));
+    const editable = !!device && canEditDevice();
+    byId("device-edit-form").hidden = !editable;
+    byId("device-label").disabled = byId("device-trust").disabled = byId("save-device").disabled = !editable;
+    byId("profile-test").hidden = !device || currentView === "dashboard" || !can("network.test");
     byId("profile-test").disabled = data.busy;
     byId("profile-test").textContent = data.testing_device === identifier ? "Testing connection…" : "Test connection · 4 requests";
     if (changed || !refresh) {
-      byId("device-label").value = device.label;
-      byId("device-trust").value = device.trust;
+      byId("device-label").value = device?.label || "";
+      byId("device-trust").value = device?.trust || "review";
       notify("profile-message");
     }
-    byId("device-profile").querySelector(".profile-hint").hidden = pinned;
+    if (!profile.matches(":popover-open")) profile.showPopover();
+    positionProfile();
     document.querySelectorAll("[data-node], [data-edge], tr[data-device]").forEach((element) => {
-      element.classList.toggle("selected", Number(element.dataset.node || element.dataset.edge || element.dataset.device) === identifier);
+      element.classList.toggle("selected", (element.dataset.node || element.dataset.edge || element.dataset.device) === String(identifier));
     });
   }
-  function scheduleClose() {
-    clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => {
-      if (!pinned && !byId("device-profile").contains(document.activeElement)) closeProfile();
-    }, 300);
+  function positionProfile() {
+    const profile = byId("device-profile");
+    if (profile.hidden) return;
+    const viewportWidth = document.documentElement.clientWidth;
+    profile.style.maxWidth = `${viewportWidth - 32}px`;
+    const anchor = ["dashboard", "map"].includes(currentView) ? byId("map-stage") : document.querySelector(".dashboard-content");
+    const bounds = anchor.getBoundingClientRect();
+    const left = mobileMap.matches ? (viewportWidth - profile.offsetWidth) / 2 : Math.max(16, Math.min(bounds.left - 8, viewportWidth - profile.offsetWidth - 16));
+    const top = Math.max(16, Math.min(bounds.top + (["dashboard", "map"].includes(currentView) ? 230 : 160), innerHeight - profile.offsetHeight - 24));
+    profile.style.left = `${left}px`; profile.style.top = `${top}px`;
   }
   function closeProfile() {
-    clearTimeout(closeTimer); selected = null; pinned = false;
-    byId("device-profile").hidden = true;
+    const profile = byId("device-profile");
+    const returnFocus = profile.contains(document.activeElement) ? document.querySelector(`[data-node="${selected}"], tr[data-device="${selected}"]`) : null;
+    selected = null;
+    if (profile.matches(":popover-open")) profile.hidePopover();
+    profile.hidden = true;
+    returnFocus?.focus({ preventScroll: true });
     document.querySelectorAll("[data-node], [data-edge], tr[data-device]").forEach((element) => element.classList.remove("selected"));
   }
 
@@ -272,6 +297,7 @@ window.UgnayDashboard = (() => {
     container.append(node("h2", device.name), node("p", `Tested ${date(device.ping.tested_at)}`, "muted"), metrics, replies);
   }
   async function runPing(identifier, count, messageId) {
+    if (currentView === "dashboard" || !can("network.test")) return;
     try { await context.api(`/api/devices/${identifier}/ping`, { count }); notify(messageId); await context.refresh(); }
     catch (error) { notify(messageId, error.message); }
   }
@@ -289,7 +315,7 @@ window.UgnayDashboard = (() => {
     byId("security-devices").replaceChildren(...data.devices.map((device) => {
       const button = node("button", undefined, "security-device"); button.type = "button";
       button.append(node("strong", device.name), node("small", device.ip_address), trustBadge(device));
-      button.addEventListener("click", () => showProfile(device.id, true)); return button;
+      button.addEventListener("click", () => showProfile(device.id)); return button;
     }));
   }
   function downloadReport() {
@@ -315,17 +341,17 @@ window.UgnayDashboard = (() => {
     byId("view-reports").addEventListener("click", () => selectView("reports"));
     byId("account-menu-toggle").addEventListener("click", () => { const open = byId("account-menu").hidden; byId("account-menu").hidden = !open; byId("account-menu-toggle").setAttribute("aria-expanded", String(open)); });
     byId("close-profile").addEventListener("click", closeProfile);
-    byId("device-profile").addEventListener("mouseenter", () => clearTimeout(closeTimer));
-    byId("device-profile").addEventListener("mouseleave", scheduleClose);
+    window.addEventListener("resize", positionProfile);
+    window.addEventListener("scroll", positionProfile, { passive: true });
     byId("device-search").addEventListener("input", () => { mapPage = 0; renderDevices(); renderMap(); });
     byId("device-edit-form").addEventListener("submit", async (event) => {
-      event.preventDefault(); if (!currentDevice()) return;
+      event.preventDefault(); if (!currentDevice() || !canEditDevice()) return;
       const identifier = selected; byId("save-device").disabled = true;
       try { await context.api(`/api/devices/${identifier}`, { label: byId("device-label").value.trim(), trust: byId("device-trust").value }); await context.refresh(); notify("profile-message", "Device details saved.", true); }
       catch (error) { notify("profile-message", error.message); }
       finally { byId("save-device").disabled = false; }
     });
-    byId("profile-test").addEventListener("click", async () => { if (!currentDevice()) return; byId("profile-test").disabled = true; await runPing(selected, 4, "profile-message"); if (data) byId("profile-test").disabled = data.busy; });
+    byId("profile-test").addEventListener("click", async () => { if (!currentDevice() || currentView === "dashboard" || !can("network.test")) return; byId("profile-test").disabled = true; await runPing(selected, 4, "profile-message"); if (data) byId("profile-test").disabled = data.busy; });
     byId("test-form").addEventListener("submit", async (event) => { event.preventDefault(); if (!byId("test-device").value) return; byId("run-test").disabled = true; await runPing(Number(byId("test-device").value), Number(byId("test-count").value), "test-message"); if (data) byId("run-test").disabled = data.busy || !can("network.test"); });
     byId("test-device").addEventListener("change", renderTestResult);
     byId("download-report").addEventListener("click", downloadReport);
@@ -335,15 +361,18 @@ window.UgnayDashboard = (() => {
     byId("map-next").addEventListener("click", () => { mapPage += 1; closeProfile(); renderMap(); });
     const map = byId("device-network-map");
     map.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || event.target.closest(".map-node")) return;
+      if (currentView === "dashboard" || event.button !== 0 || event.target.closest(".map-node")) return;
       drag = { x: event.clientX, y: event.clientY, box: { ...box } }; map.setPointerCapture(event.pointerId); map.classList.add("panning");
     });
     map.addEventListener("pointermove", (event) => { if (!drag) return; const scale = Math.max(box.width / map.clientWidth, box.height / map.clientHeight); box.x = drag.box.x - (event.clientX - drag.x) * scale; box.y = drag.box.y - (event.clientY - drag.y) * scale; updateBox(); });
     function endDrag() { drag = null; map.classList.remove("panning"); }
     map.addEventListener("pointerup", endDrag); map.addEventListener("pointercancel", endDrag);
-    map.addEventListener("wheel", (event) => { if (event.ctrlKey) { event.preventDefault(); zoom(event.deltaY < 0 ? .9 : 1.1); } }, { passive: false });
+    map.addEventListener("wheel", (event) => { if (currentView !== "dashboard" && event.ctrlKey) { event.preventDefault(); zoom(event.deltaY < 0 ? .9 : 1.1); } }, { passive: false });
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeProfile(); byId("account-menu").hidden = true; byId("account-menu-toggle").setAttribute("aria-expanded", "false"); } });
-    document.addEventListener("click", (event) => { if (!event.target.closest(".sidebar-account")) { byId("account-menu").hidden = true; byId("account-menu-toggle").setAttribute("aria-expanded", "false"); } });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".sidebar-account")) { byId("account-menu").hidden = true; byId("account-menu-toggle").setAttribute("aria-expanded", "false"); }
+      if (!event.target.closest("#device-profile, .map-node, tr[data-device], .security-device, #board-toggle")) closeProfile();
+    });
   }
 
   function mount(options) {

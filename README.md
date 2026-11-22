@@ -88,22 +88,28 @@ rendered administrator data from the page before another account can sign in.
 
 ### Dashboard and device recognition
 
-- Hover or focus a map node to preview its profile. Select it to keep the profile
-  open; Escape or the close button dismisses it. Names, IPs, and trust indicators
-  are visible on nodes. Selecting a table row opens the same profile.
-- Drag the map to pan. Use +/minus/Fit to zoom, or Ctrl+mouse wheel. Larger scans
+- The Dashboard is a read-only overview. Scan network and View Reports are its
+  action buttons. Hide collapses the device list and activity feed while keeping
+  latency, packet loss, and View Reports visible; Show restores the details.
+- Select a map node or device row to open a compact profile popup. Escape, the
+  close button, or a click outside dismisses it. The central network node opens
+  subnet details. Dashboard profiles have no editing or ping controls.
+- In Network Map, drag to pan. Use +/minus/Fit to zoom, or Ctrl+mouse wheel. Larger scans
   use map pages (eight devices per page on desktop, four on mobile) to keep labels
-  readable. Search filters the full device list and map.
+  readable. The Devices tab provides search and the full list; the Dashboard
+  previews up to four devices.
 - Check means Trusted, warning means Review, and x means Flagged. Every newly
   discovered device starts in Review. Administrators can edit its label and trust
-  in its profile. These decisions persist across rescans and restarts.
+  in profiles opened from Devices or Security. These decisions persist across
+  rescans and restarts.
 - Recognition is keyed by subnet and IP, because the discovery service does not
   collect MAC addresses or hardware identity. DHCP address reuse can represent a
   different device. Trust labels do not configure a firewall or block traffic.
 - Map lines show membership in the scanned subnet. ICMP discovery does not reveal
   physical switch, router, Wi-Fi attachment, or device-to-device topology. The
   central node represents the local subnet, without inventing physical links.
-- Use Test connection in a profile, or the Tests screen with 4, 10, or 20 requests.
+- Use Test connection in a profile outside the Dashboard, or the Tests screen
+  with 4, 10, or 20 requests.
   This calls the desktop `ConnectivityService.test_connection()` implementation.
   Ping metrics stay blank until an actual test completes. Latest Average Latency
   and Packet Loss aggregate the latest saved replies for currently detected

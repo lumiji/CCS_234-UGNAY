@@ -135,13 +135,15 @@
       </section>
 
       <section class="device-board" id="device-board" aria-label="Devices and recent activity">
-        <button class="board-toggle" id="board-toggle" type="button" aria-expanded="true" aria-controls="board-body">Hide</button>
+        <button class="board-toggle" id="board-toggle" type="button" aria-expanded="true" aria-controls="board-device-details board-activity">Hide</button>
         <div class="board-body" id="board-body">
           <div class="devices-column"><div class="board-metrics"><div><span>Latest Average Latency</span><strong id="average-latency">—</strong></div><div><span>Latest Packet Loss</span><strong id="packet-loss">—</strong></div><button class="primary-button" id="view-reports" type="button">View Reports</button></div>
-            <div class="devices-heading"><div><h2>Detected Devices</h2><p id="scan-time">Select a device to see its latest test.</p></div><label class="sr-only" for="device-search">Search devices</label><input id="device-search" type="search" placeholder="Find a device" autocomplete="off"></div>
-            <div class="table-scroll"><table class="detected-table"><caption class="sr-only">Devices in the latest scan</caption><thead><tr><th>Hostname</th><th>IP address</th><th>Trust</th><th>Ping Response</th></tr></thead><tbody id="device-rows"></tbody></table></div><p id="devices-empty" class="muted board-empty">No devices yet. Start a network scan.</p>
+            <div id="board-device-details">
+              <div class="devices-heading"><div><h2>Detected Devices</h2><p id="scan-time">Go to the Devices tab to see the full list.</p></div><label class="sr-only" for="device-search">Search devices</label><input id="device-search" type="search" placeholder="Find a device" autocomplete="off" hidden></div>
+              <div class="table-scroll"><table class="detected-table"><caption class="sr-only">Devices in the latest scan</caption><thead><tr><th>Hostname</th><th>IP address</th><th>Trust</th><th>Ping Response</th></tr></thead><tbody id="device-rows"></tbody></table></div><p id="devices-empty" class="muted board-empty">No devices yet. Start a network scan.</p>
+            </div>
           </div>
-          <section class="activity-column" aria-labelledby="activity-title"><h2 id="activity-title">Recent Activity</h2><ol id="activity-list" class="activity-list"></ol><p id="activity-empty" class="muted">Your network activity will appear here.</p></section>
+          <section class="activity-column" id="board-activity" aria-labelledby="activity-title"><h2 id="activity-title">Recent Activity</h2><ol id="activity-list" class="activity-list"></ol><p id="activity-empty" class="muted">Your network activity will appear here.</p></section>
         </div>
       </section>
 
@@ -153,7 +155,17 @@
       <section class="workspace-card access-panel detail-panel" id="settings-panel" aria-labelledby="access-title" hidden><p class="eyebrow">SETTINGS &amp; YOUR ACCESS</p><h1 id="access-title">Make yourself at home.</h1><p class="muted" id="account-email"></p><label class="motion-setting"><input id="motion-enabled" type="checkbox"> Animate the background and network map</label><p class="muted">Your system’s reduced-motion preference takes priority.</p><ul id="permissions-list" class="permissions-list"></ul><div class="session-note"><span>Session expires</span><strong id="session-expiry"></strong></div><p class="muted guest-note" id="guest-note" hidden>Guest access lasts up to two hours. Create an account to run discovery and ping tests.</p><a href="#signup" id="guest-signup" hidden>Create an account</a></section>
     </div>
 
-    <aside id="device-profile" class="device-profile" aria-labelledby="profile-name" hidden><button class="dialog-close" id="close-profile" type="button" aria-label="Close device profile">×</button><p class="eyebrow">DEVICE PROFILE</p><div id="profile-avatar" class="profile-avatar"></div><h2 id="profile-name"></h2><p id="profile-ip" class="profile-ip"></p><span id="profile-trust" class="trust-badge"></span><dl id="profile-facts"></dl><form id="device-edit-form"><label for="device-label">Device name<input id="device-label" maxlength="64" placeholder="Add a recognizable name"></label><label for="device-trust">Trust status<select id="device-trust"><option value="review">Review · New or unrecognized</option><option value="trusted">Trusted · Recognized by admin</option><option value="flagged">Flagged · Needs attention</option></select></label><button class="primary-button" type="submit" id="save-device">Save changes</button></form><button id="profile-test" class="secondary-button" type="button">Test connection · 4 requests</button><p id="profile-message" class="form-message" role="status" hidden></p><p class="profile-hint">Select a node to keep its profile open.</p></aside>
+    <aside id="device-profile" class="device-profile" popover="manual" role="dialog" aria-modal="false" aria-labelledby="profile-title profile-name" hidden>
+      <button class="dialog-close" id="close-profile" type="button" aria-label="Close device profile">×</button>
+      <p id="profile-title" class="profile-title">Device Profile</p>
+      <div class="profile-heading">
+        <div id="profile-avatar" class="profile-avatar" aria-hidden="true"></div>
+        <div class="profile-identity"><div class="profile-name-line"><h2 id="profile-name"></h2><span id="profile-trust" class="trust-badge"></span></div><p id="profile-ip" class="profile-ip"></p></div>
+      </div>
+      <dl id="profile-facts"></dl>
+      <form id="device-edit-form" hidden><label for="device-label">Device name<input id="device-label" maxlength="64" placeholder="Add a recognizable name"></label><label for="device-trust">Trust status<select id="device-trust"><option value="review">Review · New or unrecognized</option><option value="trusted">Trusted · Recognized by admin</option><option value="flagged">Flagged · Needs attention</option></select></label><button class="primary-button" type="submit" id="save-device">Save changes</button></form>
+      <button id="profile-test" class="secondary-button" type="button" hidden>Test connection · 4 requests</button><p id="profile-message" class="form-message" role="status" hidden></p>
+    </aside>
   </main>
 
   <main class="member-workspace" id="member-workspace" hidden>

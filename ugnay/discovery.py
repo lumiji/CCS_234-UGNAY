@@ -133,7 +133,7 @@ class DiscoveryService:
                 capture_output=True,
                 encoding="utf-8-sig",
                 check=True,
-                timeout=20,
+                timeout=60,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except FileNotFoundError as error:

@@ -369,6 +369,82 @@ async function loadUsers() {
   }
 }
 
+$("auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.submitting) return;
+  message("auth-message");
+  const mode = state.mode, signup = mode === "signup", guest = mode === "guest";
+  const password = $("password").value;
+  if (signup && password !== $("confirm-password").value) { message("auth-message", "Your passwords do not match."); $("confirm-password").focus(); return; }
+  state.submitting = true;
+  $("auth-submit").disabled = true;
+  $("auth-form").setAttribute("aria-busy", "true");
+  $("auth-submit").textContent = signup ? "Creating account…" : guest ? "Connecting…" : "Logging in…";
+  try {
+    const data = { username: $("username").value.trim(), identifier: $("username").value.trim(), password, email: $("email").value.trim(), confirm_password: $("confirm-password").value, remember: $("remember").checked };
+    const session = await api(`/api/${signup ? "signup" : guest ? "guest" : "login"}`, data);
+    $("auth-form").reset();
+    await showWorkspace(session);
+  } catch (error) { message("auth-message", error.message); }
+  finally {
+    state.submitting = false;
+    $("auth-submit").disabled = false;
+    $("auth-form").removeAttribute("aria-busy");
+    $("auth-submit").textContent = signup ? "Sign up" : guest ? "Continue as Guest" : "Login";
+  }
+});
+
+document.querySelectorAll(".password-toggle").forEach((button) => button.addEventListener("click", () => {
+  const input = $(button.dataset.target), visible = input.type === "password";
+  input.type = visible ? "text" : "password";
+  button.setAttribute("aria-pressed", String(visible));
+  button.setAttribute("aria-label", `${visible ? "Hide" : "Show"} ${button.dataset.target === "confirm-password" ? "confirmation password" : "password"}`);
+}));
+$("forgot-password").addEventListener("click", () => $("recovery-dialog").showModal());
+$("close-recovery").addEventListener("click", () => $("recovery-dialog").close());
+$("recovery-done").addEventListener("click", () => $("recovery-dialog").close());
+$("close-reset").addEventListener("click", () => $("reset-dialog").close());
+async function logOut(button) {
+  button.disabled = true;
+  try { await api("/api/logout", {}); history.replaceState(null, "", "#login"); showAuth("login", true); }
+  catch (error) { message(state.session?.user.role === "admin" ? "workspace-message" : "member-message", error.message); }
+  finally { button.disabled = false; }
+}
+$("logout").addEventListener("click", () => logOut($("logout")));
+$("member-logout").addEventListener("click", () => logOut($("member-logout")));
+$("scan").addEventListener("click", async () => {
+  $("scan").disabled = true;
+  try { await api("/api/network/scan", {}); clearTimeout(state.polling); await loadNetwork(); }
+  catch (error) { message("workspace-message", error.message); $("scan").disabled = false; }
+});
+$("member-scan").addEventListener("click", async () => {
+  $("member-scan").disabled = true;
+  try { await api("/api/network/scan", {}); await loadNetwork(); }
+  catch (error) { message("member-message", error.message); $("member-scan").disabled = false; }
+});
+$("refresh-users").addEventListener("click", loadUsers);
+$("reset-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if ($("reset-password").value !== $("reset-confirm").value) { message("reset-message", "Your passwords do not match."); return; }
+  const button = $("reset-form").querySelector("button[type=submit]"); button.disabled = true;
+  try {
+    const ownAccount = state.resetUser === state.session.user.id;
+    await api(`/api/admin/users/${state.resetUser}`, { password: $("reset-password").value });
+    $("reset-dialog").close(); $("reset-form").reset();
+    if (ownAccount) { showAuth("login", true); message("auth-message", "Password updated. Please log in with your new password.", true); }
+    else message("admin-message", "Password updated. Existing sessions for that account have ended.", true);
+  } catch (error) { message("reset-message", error.message); }
+  finally { button.disabled = false; }
+});
+window.addEventListener("hashchange", async () => {
+  // Signing up from a guest session explicitly ends the temporary session.
+  if (state.session) {
+    try { await api("/api/logout", {}); }
+    catch (error) { if (error.status !== 401) { message(state.session?.user.role === "admin" ? "workspace-message" : "member-message", error.message); return; } }
+  }
+  showAuth(modeFromHash(), true);
+});
+
 async function init() {
   showAuth(modeFromHash());
   try { await showWorkspace(await api("/api/session")); }

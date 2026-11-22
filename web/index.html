@@ -143,7 +143,7 @@
           </div>
           <div class="map-zoom" id="map-pager" role="group" aria-label="Map pages" hidden><button id="map-prev" type="button" hidden>Previous</button><span id="map-page"></span><button id="map-next" type="button" hidden>Next</button></div>
         </div>
-        <p class="map-disclosure" id="map-disclosure">Subnet membership · Physical links are not detected</p>
+        <p class="map-disclosure sr-only" id="map-disclosure">Subnet membership · Physical links are not detected</p>
       </section>
 
       <section class="device-board" id="device-board" aria-label="Devices and recent activity">
@@ -157,6 +157,18 @@
           </div>
           <section class="activity-column" id="board-activity" aria-labelledby="activity-title"><h2 id="activity-title">Recent Activity</h2><ol id="activity-list" class="activity-list"></ol><p id="activity-empty" class="muted">Your network activity will appear here.</p></section>
         </div>
+      </section>
+
+      <section id="network-map-actions" class="network-map-actions" aria-label="Network map actions" hidden>
+        <div id="map-selected-device" class="map-selected-device" hidden>
+          <div class="map-device-avatar" aria-hidden="true"><img src="/assets/device-wifi.svg" alt="" width="38" height="38"></div>
+          <div class="map-device-copy">
+            <div class="map-device-title"><h2 id="map-device-name"></h2><span id="map-device-trust" class="trust-badge"></span></div>
+            <p class="map-device-meta"><span id="map-device-hostname" title="Detected hostname"></span><span id="map-device-ip" title="IP address"></span><span id="map-device-mac" title="MAC address"></span></p>
+          </div>
+        </div>
+        <p id="map-device-empty" class="map-device-empty">Scan your network to discover devices.</p>
+        <button id="open-map-device" class="primary-button" type="button" disabled>Open Device</button>
       </section>
 
       </div>

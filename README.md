@@ -104,6 +104,13 @@ rendered administrator data from the page before another account can sign in.
   use map pages (eight devices per page on desktop, four on mobile) to keep labels
   readable. The Devices tab provides search and the full list; the Dashboard
   previews up to four devices.
+- Network Map dedicates the main area to the map without a sliding device/activity
+  board. Clicking a device still opens its profile popup. The bottom action bar
+  shows the selected device's icon, name, trust, hostname, IP, and available MAC
+  address. Missing MAC information is shown as unavailable. The bar's Open Device
+  button opens the same device in the Devices tab, or the
+  first detected device when none has been selected. It is disabled before devices
+  are detected. Dashboard panel visibility is preserved when switching tabs.
 - Devices provides a scrollable list with search and All/Trusted/Review/Flagged
   filters. Selecting a device updates its inline profile, editable name and trust,
   measured ping results, and device-specific recent activity. Run ping test sends

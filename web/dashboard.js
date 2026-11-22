@@ -40,6 +40,7 @@ window.UgnayDashboard = (() => {
   const loss = (value) => value == null ? "—" : `${Number(value.toFixed(1))}%`;
   const initials = (value) => value.split(/[\s_.-]+/).filter(Boolean).slice(0, 2).map((word) => [...word][0]).join("").toUpperCase() || "?";
   const currentDevice = () => data?.devices.find((device) => device.id === selected);
+  const mapActionDevice = () => currentDevice() || data?.devices.find((device) => device.id === browserSelected) || data?.devices[0];
   const canEditDevice = () => ["devices", "security"].includes(currentView) && can("devices.manage");
   const filteredDevices = () => {
     const query = currentView === "devices" ? byId("device-search").value.trim().toLowerCase() : "";
@@ -76,12 +77,14 @@ window.UgnayDashboard = (() => {
     byId("dashboard-overview").hidden = !["dashboard", "map"].includes(view);
     byId("devices-panel").hidden = view !== "devices";
     byId("map-stage").hidden = !["dashboard", "map"].includes(view);
-    byId("device-board").hidden = !["dashboard", "map"].includes(view);
-    byId("board-toggle").hidden = view === "devices";
-    applyBoard(view === "devices" ? false : view === "map" ? true : collapsed);
+    byId("device-board").hidden = view !== "dashboard";
+    byId("board-toggle").hidden = view !== "dashboard";
+    byId("network-map-actions").hidden = view !== "map";
+    applyBoard(collapsed);
     closeProfile();
     mapPage = 0; fit();
     if (data) { renderMap(); renderDevices(); renderActivities(); renderDeviceBrowser(); loadBrowserDetail(); }
+    renderMapDeviceSummary();
     document.title = `${view === "map" ? "Network Map" : view[0].toUpperCase() + view.slice(1)} · UGNAY`;
     if (view === "access") context.loadUsers();
   }
@@ -111,6 +114,7 @@ window.UgnayDashboard = (() => {
     byId("average-latency").title = `Latest tests for ${data.metrics.tested_devices} currently detected devices`;
     byId("run-test").disabled = !can("network.test") || data.busy || !data.devices.length;
     byId("profile-test").disabled = data.busy;
+    renderMapDeviceSummary();
     byId("network-empty").hidden = !!data.network;
     byId("network-empty").querySelector("h2").textContent = data.busy ? "Looking for connections…" : "Every connection. In view.";
     byId("network-empty").querySelector("p").textContent = can("network.scan") ? "Scan your network to discover responding devices." : "An administrator or user can run a scan. Results will appear here.";
@@ -122,6 +126,25 @@ window.UgnayDashboard = (() => {
     if (selected !== null) {
       if (currentDevice() || (selected === "network" && data.network)) showProfile(selected, true); else closeProfile();
     }
+  }
+
+  function renderMapDeviceSummary() {
+    if (currentView !== "map") return;
+    const device = mapActionDevice();
+    byId("map-selected-device").hidden = !device;
+    byId("map-device-empty").hidden = !!device;
+    byId("open-map-device").disabled = !device;
+    if (!device) {
+      ["map-device-name", "map-device-trust", "map-device-hostname", "map-device-ip", "map-device-mac"].forEach((id) => byId(id).replaceChildren());
+      return;
+    }
+    byId("map-device-name").textContent = device.name;
+    byId("map-device-name").title = device.name;
+    byId("map-device-trust").className = `trust-badge ${device.trust}`;
+    byId("map-device-trust").textContent = trustNames[device.trust];
+    byId("map-device-hostname").textContent = device.hostname || "Hostname unavailable";
+    byId("map-device-ip").textContent = device.ip_address;
+    byId("map-device-mac").textContent = device.mac_address || "MAC not available";
   }
 
   function renderMap() {
@@ -352,6 +375,8 @@ window.UgnayDashboard = (() => {
     if (!device && !network) return;
     const changed = selected !== identifier;
     selected = identifier;
+    if (device && currentView === "map") browserSelected = device.id;
+    renderMapDeviceSummary();
     const pageSize = mobileMap.matches ? 4 : 8;
     const position = filteredDevices().findIndex((item) => item.id === identifier);
     if (position >= 0 && Math.floor(position / pageSize) !== mapPage) {
@@ -405,6 +430,7 @@ window.UgnayDashboard = (() => {
     profile.hidden = true;
     returnFocus?.focus({ preventScroll: true });
     document.querySelectorAll("[data-node], [data-edge], tr[data-device]").forEach((element) => element.classList.remove("selected"));
+    renderMapDeviceSummary();
   }
 
   function cards(values) {
@@ -513,6 +539,14 @@ window.UgnayDashboard = (() => {
     document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => selectView(button.dataset.view)));
     byId("board-toggle").addEventListener("click", () => { collapsed = byId("board-toggle").getAttribute("aria-expanded") === "true"; applyBoard(collapsed); });
     byId("view-reports").addEventListener("click", () => selectView("reports"));
+    byId("open-map-device").addEventListener("click", () => {
+      const device = mapActionDevice();
+      if (!device) return;
+      browserSelected = device.id; browserFilter = "all"; browserDraft = null; browserDetail = null;
+      byId("device-search").value = "";
+      selectView("devices");
+      byId("device-list").querySelector(`[data-browser-device="${device.id}"]`)?.scrollIntoView({ block: "nearest" });
+    });
     byId("account-menu-toggle").addEventListener("click", () => { const open = byId("account-menu").hidden; byId("account-menu").hidden = !open; byId("account-menu-toggle").setAttribute("aria-expanded", String(open)); });
     byId("close-profile").addEventListener("click", closeProfile);
     window.addEventListener("resize", positionProfile);
@@ -599,6 +633,10 @@ window.UgnayDashboard = (() => {
     ["workspace-message", "admin-message", "profile-message", "test-message"].forEach((id) => notify(id));
     ["device-list", "selected-device-name", "selected-device-avatar", "selected-device-ip", "selected-device-trust", "selected-device-facts", "selected-device-measurements", "selected-device-activity-list", "device-chart-plot", "device-latency-legend", "device-reply-data", "device-chart-title", "device-chart-description"].forEach((id) => byId(id).replaceChildren());
     byId("selected-device-form").reset(); notify("selected-device-message");
+    byId("open-map-device").disabled = true;
+    ["map-device-name", "map-device-trust", "map-device-hostname", "map-device-ip", "map-device-mac"].forEach((id) => byId(id).replaceChildren());
+    byId("map-device-name").removeAttribute("title");
+    byId("map-selected-device").hidden = true; byId("map-device-empty").hidden = false;
     ["local-ip", "network-subnet"].forEach((id) => { byId(id).textContent = "Not detected"; });
     byId("device-count").textContent = "0"; byId("last-scan").textContent = "Never";
     byId("last-scan").removeAttribute("title");

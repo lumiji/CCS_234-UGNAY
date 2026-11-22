@@ -42,9 +42,24 @@ class AuthStore:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
+            db.executescript(
+                Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
+            )
+
+            db.execute("BEGIN IMMEDIATE")
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(users)")
+            }
+            if "approved" not in columns:
+                db.execute(
+                    "ALTER TABLE users ADD COLUMN approved INTEGER "
+                    "NOT NULL DEFAULT 0 CHECK (approved IN (0, 1))"
+                )
+                db.execute("UPDATE users SET approved = 1")
+
         self.dummy_hash = password_hash(secrets.token_urlsafe(24))
 
     @contextmanager
@@ -60,26 +75,75 @@ class AuthStore:
 
     @staticmethod
     def public_user(row, db):
-        permissions = [r[0] for r in db.execute(
-            "SELECT permission FROM role_permissions WHERE role=? ORDER BY permission", (row["role"],))]
-        return {key: row[key] for key in (
-            "id", "username", "email", "role", "active", "created_at", "expires_at"
-        )} | {"permissions": permissions}
+        if not row["active"]:
+            status = "disabled"
+        elif row["role"] == "guest":
+            status = "guest"
+        elif row["approved"]:
+            status = "approved"
+        else:
+            status = "pending"
 
+        permissions = []
+        if status in ("approved", "guest"):
+            permissions = [
+                item["permission"]
+                for item in db.execute(
+                    "SELECT permission FROM role_permissions "
+                    "WHERE role = ? ORDER BY permission",
+                    (row["role"],),
+                )
+            ]
+
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "email": row["email"],
+            "role": row["role"],
+            "active": row["active"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "status": status,
+            "permissions": permissions,
+        }
+    
     def create_user(self, username, email, password, role="user"):
-        if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", username.strip()):
+        if not isinstance(username, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]{3,32}", username.strip()
+        ):
             raise AuthError("Use 3–32 letters, numbers, dots, underscores, or hyphens for your username.")
-        if not isinstance(email, str) or len(email) > 254 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email.strip()):
+
+        if not isinstance(email, str) or len(email) > 254 or not re.fullmatch(
+            r"[^\s@]+@[^\s@]+\.[^\s@]+", email.strip()
+        ):
             raise AuthError("Enter a valid email address.")
+
         if role not in ("admin", "user"):
             raise AuthError("Invalid account role.")
+
         validate_password(password)
+        approved = int(role == "admin")
+
         try:
             with self.connect() as db:
                 cursor = db.execute(
-                    "INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,?,?)",
-                    (username.strip(), email.strip().lower(), password_hash(password), role, int(time.time())))
-                return self.public_user(db.execute("SELECT * FROM users WHERE id=?", (cursor.lastrowid,)).fetchone(), db)
+                    "INSERT INTO users "
+                    "(username, email, password_hash, role, created_at, approved) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        username.strip(),
+                        email.strip().lower(),
+                        password_hash(password),
+                        role,
+                        int(time.time()),
+                        approved,
+                    ),
+                )
+                row = db.execute(
+                    "SELECT * FROM users WHERE id = ?",
+                    (cursor.lastrowid,),
+                ).fetchone()
+                return self.public_user(row, db)
         except sqlite3.IntegrityError:
             raise AuthError("That username or email is already registered.", 409) from None
 
@@ -142,36 +206,87 @@ class AuthStore:
                 "SELECT * FROM users WHERE expires_at IS NULL OR expires_at>? ORDER BY created_at DESC,id DESC", (int(time.time()),))]
 
     def update_user(self, actor_id, user_id, changes):
-        if not changes or set(changes) - {"role", "active", "password"}:
-            raise AuthError("Choose a role, account status, or new password.")
+        allowed_fields = {"role", "active", "password", "approved"}
+        if not isinstance(changes, dict) or not changes or set(changes) - allowed_fields:
+            raise AuthError("Choose an approval, role, account status, or new password.")
+
+        if "approved" in changes:
+            if len(changes) != 1 or changes["approved"] is not True:
+                raise AuthError("Submit approval by itself with approved set to true.")
+
         if "role" in changes and changes["role"] not in ("user", "admin", "guest"):
             raise AuthError("Invalid account role.")
+
         if "active" in changes and type(changes["active"]) is not bool:
             raise AuthError("Active must be true or false.")
+
         if "password" in changes:
             validate_password(changes["password"])
+
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
+            actor = db.execute(
+                "SELECT role, active, approved FROM users WHERE id = ?",
+                (actor_id,),
+            ).fetchone()
+            if not actor or actor["role"] != "admin" or not actor["active"] or not actor["approved"]:
+                raise AuthError("An approved, active administrator is required.", 403)
+
+            row = db.execute(
+                "SELECT * FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
             if not row:
                 raise AuthError("Account not found.", 404)
-            if row["role"] == "guest" and "role" in changes and changes["role"] != "guest":
-                raise AuthError("Temporary guests must sign up for a permanent account.")
-            if row["role"] != "guest" and changes.get("role") == "guest":
-                raise AuthError("Use Disable for a permanent account; guest sessions are temporary.")
-            if row["role"] == "guest" and "password" in changes:
-                raise AuthError("Guests use temporary password-free sessions.")
-            if user_id == actor_id and (changes.get("role", "admin") != "admin" or changes.get("active") is False):
+
+            if "approved" in changes:
+                if row["role"] != "user" or not row["active"] or row["approved"]:
+                    raise AuthError("Only active, pending users can be approved.")
+
+            if row["role"] == "guest":
+                if "role" in changes and changes["role"] != "guest":
+                    raise AuthError("Temporary guests must sign up for a permanent account.")
+                if "password" in changes:
+                    raise AuthError("Guests use temporary password-free sessions.")
+            elif changes.get("role") == "guest":
+                raise AuthError("Use Disable for a permanent account. Guest sessions are temporary.")
+
+            if changes.get("role") == "admin" and not row["approved"]:
+                raise AuthError("Approve this account before granting administrator access.")
+
+            removes_admin_access = (
+                changes.get("role", row["role"]) != "admin"
+                or changes.get("active") is False
+            )
+            if user_id == actor_id and removes_admin_access:
                 raise AuthError("You cannot remove your own administrator access.")
-            if row["role"] == "admin" and (changes.get("role", "admin") != "admin" or changes.get("active") is False):
-                count = db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1").fetchone()[0]
-                if row["active"] and count <= 1:
+
+            if row["role"] == "admin" and row["active"] and removes_admin_access:
+                admin_count = db.execute(
+                    "SELECT COUNT(*) FROM users "
+                    "WHERE role = 'admin' AND active = 1 AND approved = 1"
+                ).fetchone()[0]
+                if admin_count <= 1:
                     raise AuthError("At least one active administrator is required.")
+
             for field, value in changes.items():
-                column = "password_hash" if field == "password" else field
-                db.execute(f"UPDATE users SET {column}=? WHERE id=?", (password_hash(value) if field == "password" else value, user_id))
-            db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
-            return self.public_user(db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone(), db)
+                column = field
+                if field == "password":
+                    column = "password_hash"
+                    value = password_hash(value)
+                db.execute(
+                    f"UPDATE users SET {column} = ? WHERE id = ?",
+                    (value, user_id),
+                )
+
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+            updated_user = db.execute(
+                "SELECT * FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            return self.public_user(updated_user, db)
 
     def reset_password(self, identifier, password):
         validate_password(password)

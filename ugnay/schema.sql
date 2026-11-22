@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT,
     role TEXT NOT NULL DEFAULT 'user' REFERENCES roles(name),
     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    approved INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1)),
     created_at INTEGER NOT NULL,
     expires_at INTEGER,
     CHECK (role = 'guest' OR (email IS NOT NULL AND password_hash IS NOT NULL))

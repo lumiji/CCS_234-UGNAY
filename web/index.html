@@ -262,6 +262,27 @@
           <section class="report-device-info" aria-labelledby="report-info-title"><h2 id="report-info-title">Device Info</h2><div id="report-device-identity" class="report-device-identity"></div><dl id="report-device-facts"></dl><p id="report-device-empty" class="muted">Select a device to view its information.</p></section>
           <section class="report-packets" aria-label="Packet results"><div class="report-packet-scroll"><table><caption class="sr-only">Packet results for all saved tests of the selected device in this scan. Failure means no reply; packet error codes are not recorded.</caption><thead><tr><th>Packet</th><th>Success</th><th>Failure</th><th>Error</th><th>Test Time</th></tr></thead><tbody id="report-packet-rows"></tbody></table><p id="report-packets-empty" class="muted">No ping tests recorded for this device in the selected scan.</p></div></section>
         </div>
+        <!-- Module 3: scan-wide health assessment; original device charts above are unchanged. -->
+        <div class="report-insights">
+          <section class="report-network-assessment" aria-labelledby="report-network-title">
+            <h2 id="report-network-title">Network-wide Health Assessment</h2>
+            <p class="report-insight-caption">Latest available ping test per device in the selected scan.</p>
+            <strong id="report-network-health" class="report-health-status" role="status">Not tested</strong>
+            <dl class="report-network-metrics">
+              <div><dt>Devices tested</dt><dd id="report-network-tested">—</dd></div>
+              <div><dt>Average latency</dt><dd id="report-network-latency">—</dd></div>
+              <div><dt>Average packet loss</dt><dd id="report-network-loss">—</dd></div>
+            </dl>
+            <p id="report-network-summary" class="report-network-summary">Choose a saved scan to review its network health.</p>
+          </section>
+          <section class="report-recommendations" aria-labelledby="report-recommendations-title">
+            <h2 id="report-recommendations-title">Connectivity Alerts &amp; Security Recommendations</h2>
+            <ul id="report-recommendation-items" class="report-recommendation-items" aria-live="polite">
+              <li class="report-advice info">Choose a saved scan to view recommendations.</li>
+            </ul>
+            <p class="report-security-disclaimer">Ping tests measure connectivity, not device security. Firewall and password advice are general reminders.</p>
+          </section>
+        </div>
         <div class="reports-notes"><p>Tests belong to the interval from the selected scan until the next scan. Device details use current saved values. Failure means no reply; packet error codes are not recorded. History retains up to 1,000 tests.</p><button id="download-report" class="text-button" type="button" disabled>Download text report</button></div>
         <section id="report-added-tests" class="report-added-tests" aria-labelledby="report-added-tests-title" hidden><h2 id="report-added-tests-title">Added ping tests</h2><p>These saved copies are included in your export, independently of the selectors. They stay here until reload or sign-out.</p><div class="table-scroll"><table><caption class="sr-only">Ping tests added to the report</caption><thead><tr><th>Device</th><th>Tested</th><th>Sent</th><th>Received</th><th>Loss</th><th>Avg</th><th>Max</th></tr></thead><tbody id="report-test-rows"></tbody></table></div></section>
       </section>

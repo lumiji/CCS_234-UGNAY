@@ -473,6 +473,10 @@ window.UgnayDashboard = (() => {
     const device = testsDevice();
     if (currentView !== "tests" || !device || !context) return;
     const identifier = device.id, session = context.session, request = ++testsRequest;
+
+    // ADD THIS LINE HERE
+    console.log("TEST DEVICE ID:", identifier);
+
     try {
       const result = await context.api(`/api/admin/devices/${identifier}`);
       if (context?.session !== session || currentView !== "tests" || testsDevice()?.id !== identifier || request !== testsRequest) return;

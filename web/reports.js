@@ -58,6 +58,66 @@ window.UgnayReports = (() => {
       detail = null; loading = false; fingerprint = ""; renderView(); message(`Could not load this report: ${error.message}`);
     }
   }
+  // Member 3: network-wide calculations use one latest saved ping test per device.
+  // This matches reporting.py's equal-weight-per-device approach and thresholds.
+  function summarizeScan(scan) {
+    const devices = scan?.devices || [];
+    const measured = devices.map((item) => ({ item, ping: item.ping_history?.[0] }))
+      .filter(({ ping }) => Boolean(ping));
+    const samples = measured.map(({ ping }) => ping.average_latency_ms)
+      .filter((value) => typeof value === "number" && Number.isFinite(value));
+    const losses = measured.map(({ ping }) => ping.packet_loss_percent)
+      .filter((value) => typeof value === "number" && Number.isFinite(value));
+    const averageLatency = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
+    const averageLoss = losses.length ? losses.reduce((sum, value) => sum + value, 0) / losses.length : null;
+    const urgent = measured.some(({ ping }) => ping.status === "Unreachable" ||
+      ping.packet_loss_percent >= 10 || ping.average_latency_ms >= 100);
+    const fair = measured.some(({ ping }) => ping.status === "Packet loss" ||
+      ping.packet_loss_percent > 0 || ping.average_latency_ms >= 50);
+    const health = !devices.length ? "No devices detected" : !measured.length ? "Not tested" :
+      urgent ? "Needs attention" : fair ? "Fair" :
+      measured.length !== devices.length ? "Partially tested" : "Healthy";
+    return { devices, measured, averageLatency, averageLoss, health };
+  }
+  function adviceForScan(summary) {
+    const { devices, measured } = summary, items = [];
+    if (!devices.length) {
+      items.push({ severity: "info", message: "No devices were found in this scan. Check the network connection and run discovery again." });
+    } else if (!measured.length) {
+      items.push({ severity: "info", message: "No ping tests are available for this scan. Test selected devices to measure latency and packet loss." });
+    } else {
+      const noResponse = measured.filter(({ ping }) => ping.status === "Unreachable");
+      const highLoss = measured.filter(({ ping }) => ping.status !== "Unreachable" && ping.packet_loss_percent >= 10);
+      const anyLoss = measured.filter(({ ping }) => ping.status !== "Unreachable" && ping.packet_loss_percent > 0 && ping.packet_loss_percent < 10);
+      const highLatency = measured.filter(({ ping }) => ping.average_latency_ms != null && ping.average_latency_ms >= 100);
+      const fairLatency = measured.filter(({ ping }) => ping.average_latency_ms != null && ping.average_latency_ms >= 50 && ping.average_latency_ms < 100);
+      const untested = devices.length - measured.length;
+      const names = (list) => list.map(({ item }) => `${item.name || item.hostname || item.ip_address} (${item.ip_address})`).join(", ");
+      if (noResponse.length) items.push({ severity: "error", message: `No ping response from: ${names(noResponse)}. Check connectivity and ICMP/firewall settings; a missing reply does not prove the device is offline.` });
+      if (highLoss.length) items.push({ severity: "warning", message: `High packet loss (10% or more): ${names(highLoss)}. Check Wi-Fi signal, congestion, and network equipment.` });
+      if (anyLoss.length) items.push({ severity: "warning", message: `Some packet loss detected: ${names(anyLoss)}. Repeat ping tests to check whether the problem persists.` });
+      if (highLatency.length) items.push({ severity: "warning", message: `High average latency (100 ms or more): ${names(highLatency)}. Investigate response delays.` });
+      if (fairLatency.length) items.push({ severity: "info", message: `Elevated average latency (50–99.9 ms): ${names(fairLatency)}. Monitor these devices over additional tests.` });
+      if (untested) items.push({ severity: "info", message: `${untested} of ${devices.length} discovered devices have no saved ping test for this scan.` });
+      if (!items.length) items.push({ severity: "success", message: "All detected devices have saved tests with no observed packet loss or elevated average latency." });
+    }
+    items.push({ severity: "info", message: "General security reminder: use strong Wi-Fi passwords, keep router firmware updated, and enable appropriate firewall protection. Ping tests do not verify these settings." });
+    return items;
+  }
+  function renderNetworkAssessment() {
+    const summary = summarizeScan(detail);
+    const status = byId("report-network-health");
+    status.textContent = detail ? summary.health : "No report selected";
+    status.className = `report-health-status ${detail ? summary.health.toLowerCase().replaceAll(" ", "-") : ""}`;
+    byId("report-network-tested").textContent = detail ? `${summary.measured.length} / ${summary.devices.length}` : "—";
+    byId("report-network-latency").textContent = detail ? latency(summary.averageLatency) : "—";
+    byId("report-network-loss").textContent = detail ? loss(summary.averageLoss) : "—";
+    const note = !detail ? "Choose a saved scan to review its network health." :
+      `Assessment uses the latest saved ping test for each device in this scan. Average latency and loss are equal-weighted device means; missing latency values are excluded.`;
+    byId("report-network-summary").textContent = note;
+    const tips = detail ? adviceForScan(summary) : [{ severity: "info", message: "Choose a saved scan to view recommendations." }];
+    byId("report-recommendation-items").replaceChildren(...tips.map((tip) => node("li", tip.message, `report-advice ${tip.severity}`)));
+  }
   function renderView() {
     const select = byId("report-device"), previous = select.value;
     select.replaceChildren(...(detail?.devices || []).map((item) => {
@@ -83,6 +143,7 @@ window.UgnayReports = (() => {
     const empty = loading ? "Loading saved results…" : !detail ? "Select a saved scan to view its results." : !selected ? "No devices responded in this scan." : "No ping tests recorded for this device in the selected scan.";
     byId("report-line-empty").textContent = byId("report-bar-empty").textContent = byId("report-packets-empty").textContent = empty;
     byId("report-packets-empty").hidden = !!tests.length;
+    renderNetworkAssessment();
     const identity = byId("report-device-identity"); identity.replaceChildren();
     byId("report-device-empty").hidden = !!selected;
     if (selected) identity.append(node("strong", selected.name), node("span", trustNames[selected.trust], `trust-badge ${selected.trust}`));
@@ -160,6 +221,7 @@ window.UgnayReports = (() => {
     request += 1; context = state = detail = null; drafts = []; active = loading = false; fingerprint = "";
     ["report-device", "report-scan", "report-device-identity", "report-device-facts", "report-packet-rows", "report-test-rows", "report-line-plot", "report-line-legend", "report-reply-data", "report-bar-plot", "report-line-title", "report-line-description", "report-bar-description", "report-date-context", "report-print-context"].forEach((id) => byId(id).replaceChildren());
     ["report-sent", "report-tested", "report-latest"].forEach((id) => { byId(id).textContent = "—"; });
+    renderNetworkAssessment();
     ["export-report-pdf", "download-report", "report-device", "report-scan"].forEach((id) => { byId(id).disabled = true; });
     ["report-line-chart", "report-bar-chart"].forEach((id) => byId(id).setAttribute("hidden", ""));
     byId("report-added-tests").hidden = true; message();

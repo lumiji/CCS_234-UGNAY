@@ -127,7 +127,7 @@ window.UgnayReports = (() => {
     if (detail?.devices.some((item) => String(item.id) === previous)) select.value = previous;
     select.disabled = loading || !detail?.devices.length;
     byId("reports-panel").setAttribute("aria-busy", String(loading));
-    byId("export-report-pdf").disabled = byId("download-report").disabled = loading || !detail;
+    byId("export-report-pdf").disabled = loading || !detail;   
     const selected = device(), tests = selected?.ping_history || [], latest = tests[0];
     const selectedScan = state?.scan_history.find((scan) => String(scan.id) === byId("report-scan").value);
     const at = detail?.scanned_at || selectedScan?.scanned_at;
@@ -203,7 +203,6 @@ window.UgnayReports = (() => {
     initialized = true;
     byId("report-scan").addEventListener("change", () => { detail = null; fingerprint = ""; message(); load(true); });
     byId("report-device").addEventListener("change", () => { message(); renderView(); });
-    byId("download-report").addEventListener("click", downloadText);
     byId("export-report-pdf").addEventListener("click", () => {
       if (!active || !detail || loading) return;
       const title = document.title;
@@ -222,7 +221,7 @@ window.UgnayReports = (() => {
     ["report-device", "report-scan", "report-device-identity", "report-device-facts", "report-packet-rows", "report-test-rows", "report-line-plot", "report-line-legend", "report-reply-data", "report-bar-plot", "report-line-title", "report-line-description", "report-bar-description", "report-date-context", "report-print-context"].forEach((id) => byId(id).replaceChildren());
     ["report-sent", "report-tested", "report-latest"].forEach((id) => { byId(id).textContent = "—"; });
     renderNetworkAssessment();
-    ["export-report-pdf", "download-report", "report-device", "report-scan"].forEach((id) => { byId(id).disabled = true; });
+    ["export-report-pdf", "report-device", "report-scan"].forEach((id) => { byId(id).disabled = true; });
     ["report-line-chart", "report-bar-chart"].forEach((id) => byId(id).setAttribute("hidden", ""));
     byId("report-added-tests").hidden = true; message();
   }

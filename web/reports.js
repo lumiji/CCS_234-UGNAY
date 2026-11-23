@@ -115,8 +115,44 @@ window.UgnayReports = (() => {
     const note = !detail ? "Choose a saved scan to review its network health." :
       `Assessment uses the latest saved ping test for each device in this scan. Average latency and loss are equal-weighted device means; missing latency values are excluded.`;
     byId("report-network-summary").textContent = note;
-    const tips = detail ? adviceForScan(summary) : [{ severity: "info", message: "Choose a saved scan to view recommendations." }];
-    byId("report-recommendation-items").replaceChildren(...tips.map((tip) => node("li", tip.message, `report-advice ${tip.severity}`)));
+    const tips = detail ? adviceForScan(summary) : [{ severity: "info", message: "Choose a saved scan to view recommendations." }]; 
+    byId("report-recommendation-items").replaceChildren(
+      ...tips.map((tip) => {
+        const isSecurity = tip.message.startsWith("General security reminder:");
+
+        const title = isSecurity
+          ? "General Security Reminder"
+          : tip.severity === "success"
+            ? "No Connectivity Alerts"
+            : tip.severity === "error"
+              ? "No Ping Response"
+              : tip.severity === "warning"
+                ? "Connectivity Warning"
+                : "Connectivity Information";
+
+        const description = isSecurity
+          ? tip.message
+              .replace(/^General security reminder:\s*/, "")
+              .replace(/\s*Ping tests do not verify these settings\.$/, "")
+          : tip.severity === "success"
+            ? "No elevated average latency or packet loss was detected in the latest tests."
+            : tip.message;
+
+        const item = node(
+          "li",
+          undefined,
+          `report-advice ${tip.severity}${isSecurity ? " security" : ""}`
+        );
+
+        item.append(
+          node("strong", title, "report-advice-title"),
+          node("span", description, "report-advice-message")
+        );
+
+        return item;
+      })
+    );
+
   }
   function renderView() {
     const select = byId("report-device"), previous = select.value;

@@ -477,3 +477,64 @@ body.member-view .brand { position: absolute; left: 32px; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+
+/* Module 3: Recommendation card enhancements */
+
+#reports-panel .report-advice {
+    position: relative;
+    padding: 14px 16px 14px 48px;
+}
+
+#reports-panel .report-advice::before {
+    content: "i";
+    position: absolute;
+    left: 14px;
+    top: 15px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    background: #dceafb;
+    color: #2864a3;
+}
+
+#reports-panel .report-advice.success::before {
+    content: "✓";
+    background: #d2efdc;
+    color: #217b47;
+}
+
+#reports-panel .report-advice.warning::before {
+    content: "!";
+    background: #ffebc4;
+    color: #98620d;
+}
+
+#reports-panel .report-advice.error::before {
+    content: "!";
+    background: #fbdde2;
+    color: #b72e45;
+}
+
+#reports-panel .report-advice.security::before {
+    content: "◆";
+    background: #dceafb;
+    color: #2864a3;
+}
+
+#reports-panel .report-advice-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+#reports-panel .report-advice-message {
+    display: block;
+    font-size: 13px;
+    line-height: 1.6;
+}
+

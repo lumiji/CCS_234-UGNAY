@@ -167,7 +167,38 @@ window.UgnayReports = (() => {
           : "Review connectivity findings · Security reminders available";
 
     byId("report-alert-summary").textContent = alertSummary;
+    // Prepare the compact summary for PDF export only.
+    const pdfOverview = byId("report-pdf-overview");
+    const pdfFindings = byId("report-pdf-findings");
 
+    if (pdfOverview && pdfFindings) {
+      const health = byId("report-network-health").textContent.trim();
+      const tested = byId("report-network-tested").textContent.trim();
+      const avgLatency = byId("report-network-latency").textContent.trim();
+      const avgLoss = byId("report-network-loss").textContent.trim();
+
+      pdfOverview.textContent =
+        `Overall status: ${health}. Devices tested: ${tested}. ` +
+        `Average latency (tested devices): ${avgLatency}. ` +
+        `Average packet loss (tested devices): ${avgLoss}.`;
+
+      const findings = tips.filter(
+        (tip) => tip.severity !== "success"
+      );
+
+      pdfFindings.replaceChildren(
+        ...findings.map((tip) => {
+          const item = document.createElement("li");
+
+          item.textContent = tip.message
+            .replace(/^General security reminder:\s*/i, "Security: ")
+            .replace(/\s*Ping tests do not verify these settings\.$/i, "")
+            .replace(/^Security: use /i, "Security: Use ");
+
+          return item;
+        })
+      );
+    }
   }
   function renderView() {
     const select = byId("report-device"), previous = select.value;
@@ -187,6 +218,31 @@ window.UgnayReports = (() => {
     byId("report-sent").textContent = tests.length ? String(tests.reduce((total, test) => total + test.replies.length, 0)) : "—";
     byId("report-tested").textContent = selected ? String(tests.length) : "—";
     byId("report-latest").textContent = latest ? `${latency(latest.average_latency_ms)} / ${loss(latest.packet_loss_percent)} loss` : "No test yet";
+
+    // Module 3: Compact network summary for PDF only
+    const pdfTopMeta = byId("report-pdf-top-meta");
+    const pdfTopPoints = byId("report-pdf-top-points");
+
+    if (pdfTopMeta && pdfTopPoints) {
+      pdfTopMeta.textContent =
+        byId("report-date-context").textContent;
+
+      pdfTopPoints.replaceChildren();
+
+      if (detail) {
+        const summaryLines = [
+          `Packets sent: ${byId("report-sent").textContent}`,
+          `Ping tests conducted: ${byId("report-tested").textContent}`,
+          `Latest test: ${byId("report-latest").textContent}`
+        ];
+
+        summaryLines.forEach((text) => {
+          const item = document.createElement("li");
+          item.textContent = text;
+          pdfTopPoints.appendChild(item);
+        });
+      }
+    }
     const plotted = tests.slice(0, 3);
     context?.drawReplyChart({ chart: "report-line-chart", plot: "report-line-plot", title: "report-line-title", description: "report-line-description", rows: "report-reply-data", legend: "report-line-legend" }, selected, plotted, 28, 652);
     drawBars(plotted);
@@ -244,7 +300,7 @@ window.UgnayReports = (() => {
     const add = (name, ping) => lines.push("", `${name} | ${date(ping.tested_at)}`, `Sent: ${ping.replies.length} | Received: ${ping.replies.filter((reply) => reply.latency_ms != null).length} | Loss: ${loss(ping.packet_loss_percent)} | Average: ${latency(ping.average_latency_ms)} | Maximum: ${latency(ping.maximum_latency_ms)}`, ...ping.replies.map((reply) => `Request ${reply.sequence}: ${reply.latency_ms == null ? "Timed out" : latency(reply.latency_ms)}`));
     tests.forEach((test) => add(selected.name, test));
     if (drafts.length) { lines.push("", "Added ping tests"); drafts.forEach((entry) => add(`${entry.name} | ${entry.ip_address}`, entry.ping)); }
-    lines.push("", "Tests belong to the interval from the selected scan until the next scan. Device details use current saved values. History retains up to 1,000 tests. Failure means no reply; packet error codes are not recorded.");
+    lines.push("", "Ping results are grouped by scan period. Device information reflects the latest saved details. Unanswered requests count as failed pings. Up to 1,000 recent ping tests are retained.");
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" })), link = node("a");
     link.href = url; link.download = "UGNAY-network-report.txt"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -254,12 +310,41 @@ window.UgnayReports = (() => {
     initialized = true;
     byId("report-scan").addEventListener("change", () => { detail = null; fingerprint = ""; message(); load(true); });
     byId("report-device").addEventListener("change", () => { message(); renderView(); });
+
     byId("export-report-pdf").addEventListener("click", () => {
       if (!active || !detail || loading) return;
-      const title = document.title;
-      document.title = `UGNAY Report - ${device()?.name || "Network"} - ${new Date(detail.scanned_at).toLocaleDateString()}`;
-      try { window.print(); } finally { document.title = title; }
-      message("Choose Save as PDF in the print dialog to export this report.", true);
+
+      // Remember which sections were expanded.
+      const sections = [
+        byId("report-network-accordion"),
+        byId("report-recommendations-accordion")
+      ].filter(Boolean);
+
+      const previousStates = sections.map(section => section.open);
+
+      // Expand both sections for the PDF.
+      sections.forEach(section => {
+        section.open = true;
+      });
+
+      const originalTitle = document.title;
+      document.title = `UGNAY Network Health Report - ${device()?.name || "Network"}`;
+
+      // Restore the original appearance after printing.
+      const restore = () => {
+        sections.forEach((section, index) => {
+          section.open = previousStates[index];
+        });
+        document.title = originalTitle;
+      };
+
+      window.addEventListener("afterprint", restore, { once: true });
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.print();
+        });
+      });
     });
   }
   function setActive(value) {

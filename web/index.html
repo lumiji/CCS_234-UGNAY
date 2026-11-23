@@ -244,7 +244,12 @@
           <div class="reports-fields"><label for="report-device">Selected Device<select id="report-device" disabled><option value="">No detected devices</option></select></label><label for="report-scan">Selected Date and Scan<select id="report-scan" disabled><option value="">No saved scans</option></select></label></div>
           <p id="report-message" class="form-message" role="status" hidden></p><p id="report-print-context" class="report-print-context"></p>
         </div>
-        <section class="reports-health" aria-labelledby="report-health-title"><h2 id="report-health-title">Network Health Summary</h2><p id="report-date-context">Scan your network to create a report.</p>
+        <section class="reports-health" aria-labelledby="report-health-title"><h2 id="report-health-title">Network Health Summary</h2><p id="report-date-context">Scan your network to create a report.</p>   
+        <section id="report-pdf-top-summary" class="report-pdf-top-summary">
+          <h2>Network Health Summary</h2>
+          <p id="report-pdf-top-meta"></p>
+          <ul id="report-pdf-top-points"></ul>
+        </section>
           <div class="report-health-metrics">
             <div class="report-health-stat" title="Packets sent across this device's tests in the selected scan"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><rect x="9" y="8" width="30" height="24" rx="4" fill="currentColor"/><path d="M5 38h38" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg><div><strong id="report-sent">—</strong><span>Sent<span class="sr-only"> packets</span></span></div></div>
             <div class="report-health-stat" title="Completed ping tests for this device in the selected scan"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="currentColor"/><path d="m15 23 8 9 15-21" fill="none" stroke="#15283e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong id="report-tested">—</strong><span>Tested<span class="sr-only"> (completed tests)</span></span></div></div>
@@ -352,6 +357,20 @@
         </section>
 
       </div>
+      <!-- Compact PDF-only assessment summary -->
+      <section id="report-pdf-summary" class="report-pdf-summary">
+        <h2>Network Assessment &amp; Recommendations</h2>
+
+        <p id="report-pdf-overview"></p>
+
+        <h3>Key Findings &amp; Recommendations</h3>
+        <ul id="report-pdf-findings"></ul>
+
+        <p class="report-pdf-method">
+          Based on the latest saved ping test per device.
+          Ping tests measure connectivity, not device security.
+        </p>
+      </section>
         <div class="reports-notes"><p>Tests belong to the interval from the selected scan until the next scan. Device details use current saved values. Failure means no reply; packet error codes are not recorded. History retains up to 1,000 tests.</p></div>
         <section id="report-added-tests" class="report-added-tests" aria-labelledby="report-added-tests-title" hidden><h2 id="report-added-tests-title">Added ping tests</h2><p>These saved copies are included in your export, independently of the selectors. They stay here until reload or sign-out.</p><div class="table-scroll"><table><caption class="sr-only">Ping tests added to the report</caption><thead><tr><th>Device</th><th>Tested</th><th>Sent</th><th>Received</th><th>Loss</th><th>Avg</th><th>Max</th></tr></thead><tbody id="report-test-rows"></tbody></table></div></section>
       </section>

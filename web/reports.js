@@ -101,7 +101,7 @@ window.UgnayReports = (() => {
       if (untested) items.push({ severity: "info", message: `${untested} of ${devices.length} discovered devices have no saved ping test for this scan.` });
       if (!items.length) items.push({ severity: "success", message: "All detected devices have saved tests with no observed packet loss or elevated average latency." });
     }
-    items.push({ severity: "info", message: "General security reminder: use strong Wi-Fi passwords, keep router firmware updated, and enable appropriate firewall protection. Ping tests do not verify these settings." });
+    items.push({ severity: "info", message: "General security reminder: Use strong Wi-Fi passwords, keep router firmware updated, and enable appropriate firewall protection. Ping tests do not verify these settings." });
     return items;
   }
   function renderNetworkAssessment() {
@@ -152,6 +152,21 @@ window.UgnayReports = (() => {
         return item;
       })
     );
+
+        // INSERT NEW ALERT SUMMARY CODE HERE
+    const alertCount = tips.filter(
+      (tip) => tip.severity === "warning" || tip.severity === "error"
+    ).length;
+
+    const alertSummary = !detail
+      ? "Select a scan to view connectivity findings."
+      : alertCount > 0
+        ? `${alertCount} connectivity alert${alertCount === 1 ? "" : "s"} detected`
+        : summary.health === "Healthy"
+          ? "No connectivity issues detected · Security reminders available"
+          : "Review connectivity findings · Security reminders available";
+
+    byId("report-alert-summary").textContent = alertSummary;
 
   }
   function renderView() {

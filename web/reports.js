@@ -311,41 +311,82 @@ window.UgnayReports = (() => {
     byId("report-scan").addEventListener("change", () => { detail = null; fingerprint = ""; message(); load(true); });
     byId("report-device").addEventListener("change", () => { message(); renderView(); });
 
-    byId("export-report-pdf").addEventListener("click", () => {
+
+    byId("export-report-pdf").addEventListener("click", async () => {
       if (!active || !detail || loading) return;
 
-      // Remember which sections were expanded.
-      const sections = [
-        byId("report-network-accordion"),
-        byId("report-recommendations-accordion")
-      ].filter(Boolean);
+      const scanId = byId("report-scan").value;
+      const selectedDevice = device();
 
-      const previousStates = sections.map(section => section.open);
+      if (!/^\d+$/.test(scanId)) {
+        message("Please select a valid network scan.");
+        return;
+      }
 
-      // Expand both sections for the PDF.
-      sections.forEach(section => {
-        section.open = true;
-      });
+      const button = byId("export-report-pdf");
+      button.disabled = true;
+      message();
 
-      const originalTitle = document.title;
-      document.title = `UGNAY Network Health Report - ${device()?.name || "Network"}`;
+      try {
+        // Request PDF for the selected scan and device.
+        let url = `/api/admin/reports/${scanId}/pdf`;
 
-      // Restore the original appearance after printing.
-      const restore = () => {
-        sections.forEach((section, index) => {
-          section.open = previousStates[index];
+        if (selectedDevice) {
+          url += `?device_id=${encodeURIComponent(selectedDevice.id)}`;
+        }
+
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          cache: "no-store"
         });
-        document.title = originalTitle;
-      };
 
-      window.addEventListener("afterprint", restore, { once: true });
+        if (!response.ok) {
+          let errorMessage = `PDF export failed (${response.status}).`;
 
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          window.print();
-        });
-      });
+          try {
+            const result = await response.json();
+            if (result.error) {
+              errorMessage = result.error;
+            }
+          } catch (_) {
+            // Keep the original HTTP error message.
+          }
+
+          throw new Error(errorMessage);
+        }
+
+        // Verify that the server returned a PDF.
+        const contentType = response.headers.get("Content-Type") || "";
+
+        if (!contentType.includes("application/pdf")) {
+          throw new Error("The server did not return a PDF file.");
+        }
+
+        const pdfBlob = await response.blob();
+        const downloadUrl = URL.createObjectURL(pdfBlob);
+
+        // Download the report automatically.
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = `UGNAY-scan-${scanId}-report.pdf`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setTimeout(() => {
+          URL.revokeObjectURL(downloadUrl);
+        }, 10000);
+
+        message("PDF report downloaded successfully.", true);
+
+      } catch (error) {
+        message(`Could not export PDF: ${error.message}`);
+      } finally {
+        button.disabled = loading || !active || !detail;
+      }
     });
+
   }
   function setActive(value) {
     active = value;

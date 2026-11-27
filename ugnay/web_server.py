@@ -29,6 +29,64 @@ ROOT = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger(__name__)
 
 
+def pdf_snapshot(scan_report, selected_device_id=None):
+
+    network = scan_report.get("network") or {}
+
+    if selected_device_id is not None and not any(
+        device["id"] == selected_device_id
+        for device in scan_report["devices"]
+    ):
+        raise AuthError(
+            "Selected device is not part of this scan.", 404
+        )
+
+    devices = []
+    selected_ip = None
+
+    for device in scan_report["devices"]:
+        history = device.get("ping_history") or []
+
+        if device["id"] == selected_device_id:
+            selected_ip = device["ip_address"]
+
+        devices.append({
+            "name": device.get("name")
+                    or device.get("hostname")
+                    or "Unnamed device",
+            "hostname": device.get("hostname"),
+            "ip_address": device["ip_address"],
+            "trust": (device.get("trust") or "review").capitalize(),
+            "first_discovered": device.get("first_seen"),
+            "last_scan_response": device.get("last_seen"),
+            "ping_history": history,
+            "ping": history[0] if history else None,
+        })
+
+    return {
+        "scan": {
+            "local_ip": network.get("local_ip"),
+            "subnet": network.get("subnet"),
+            "scanned_at": scan_report.get("scanned_at"),
+        },
+        "selected_device_ip": selected_ip,
+        "devices": devices,
+    }
+
+
+def report_logo_path():
+
+    icons = ROOT / "icons"
+
+    if not icons.is_dir():
+        return None
+
+    matches = sorted(
+        icons.rglob("ugnay_logo_darkblue.png")
+    )
+
+    return matches[0] if matches else None
+
 class WebServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -135,10 +193,17 @@ class Handler(BaseHTTPRequestHandler):
         # Request paths only; credentials, bodies, and cookies are never logged.
         LOGGER.info("%s %s", self.client_address[0], format % args)
 
-    def send(self, status, body, content_type="application/json; charset=utf-8", cookie=None):
+    def send(self, status, body, content_type="application/json; charset=utf-8", cookie=None, download_name=None):
         encoded = json.dumps(body).encode() if content_type.startswith("application/json") else body
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+
+        if download_name:
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{download_name}"'
+            )
+
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -231,6 +296,66 @@ class Handler(BaseHTTPRequestHandler):
                 if user["role"] != "admin":
                     raise AuthError("Administrator access is required for device details.", 403)
                 self.send(200, {"device": self.server.dashboard.device_detail(int(path.rsplit("/", 1)[1]))})
+            
+            elif re.fullmatch(r"/api/admin/reports/\d+/pdf", path):
+                # Administrator access only
+                user, _, _ = self.require("dashboard.view")
+
+                if user["role"] != "admin":
+                    raise AuthError(
+                        "Administrator access is required for reports.",
+                        403
+                    )
+
+                # Identify the selected saved scan
+                scan_id = int(path.split("/")[4])
+
+                # Get the selected device, if provided
+                from urllib.parse import parse_qs
+
+                query = parse_qs(
+                    urlsplit(self.path).query,
+                    keep_blank_values=True
+                )
+
+                if (
+                    set(query) - {"device_id"}
+                    or len(query.get("device_id", [])) > 1
+                ):
+                    raise AuthError("Invalid report selection.", 400)
+
+                selected = query.get("device_id", [None])[0]
+
+                if selected is not None and (
+                    not selected.isascii()
+                    or not selected.isdecimal()
+                ):
+                    raise AuthError("Invalid selected device.", 400)
+
+                # Retrieve existing historical scan data
+                report = self.server.dashboard.scan_report(scan_id)
+
+                # Prepare data for the PDF generator
+                snapshot = pdf_snapshot(
+                    report,
+                    int(selected) if selected is not None else None
+                )
+
+                # Generate the PDF report
+                from .pdf_export import generate_pdf
+
+                pdf_bytes = generate_pdf(
+                    snapshot,
+                    logo_path=report_logo_path()
+                )
+
+                # Return the PDF as a downloadable file
+                self.send(
+                    200,
+                    pdf_bytes,
+                    "application/pdf",
+                    download_name=f"UGNAY-scan-{scan_id}-report.pdf"
+                )
             elif re.fullmatch(r"/api/admin/reports/\d+", path):
                 user, _, _ = self.require("dashboard.view")
                 if user["role"] != "admin":

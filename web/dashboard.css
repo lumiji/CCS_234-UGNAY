@@ -114,7 +114,7 @@ body.authenticated .ambient-pink { opacity: .13; }
 .devices-column .table-scroll { max-height: 300px; padding-right: 22px; }
 .board-empty { margin: 14px 7px; }
 .trust-badge, .ping-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 30px; padding: 4px 10px; font-size: 12px; font-weight: 400; white-space: nowrap; line-height: 1.25; }
-.trust-badge.trusted { color: #1a61a3; background: #eaf3ff; }.trust-badge.review { color: #9c6105; background: #fff3d9; }.trust-badge.flagged { color: #b4263d; background: #fdecef; }
+.trust-badge.trusted { color: #267745; background: #e8f5e9; }.trust-badge.review { color: #9c6105; background: #fff3d9; }.trust-badge.flagged { color: #b4263d; background: #fdecef; }
 .ping-badge.responding { background: #e8f5e6; color: #267745; }.ping-badge.unreachable, .ping-badge.loss { background: #fff3d9; color: #a2690c; }.ping-badge.untested { background: #e7edf4; color: #61758d; }
 .activity-column { padding: 34px 24px 24px; border-left: 2px solid #d5e0ee; min-width: 0; }
 .activity-column h2 { margin: 2px 0 13px; }

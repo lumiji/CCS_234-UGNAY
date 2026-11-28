@@ -355,7 +355,7 @@ class Handler(BaseHTTPRequestHandler):
                     200,
                     pdf_bytes,
                     "application/pdf",
-                    download_name=f"UGNAY-scan-{scan_id}-report.pdf"
+                    download_name=f"UGNAY_Network_Health_Report_Scan{scan_id}.pdf"
                 )
             elif re.fullmatch(r"/api/admin/reports/\d+", path):
                 user, _, _ = self.require("dashboard.view")

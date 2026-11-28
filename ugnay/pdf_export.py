@@ -235,7 +235,19 @@ def _latency_chart(
     ]
 
     count = max(1, *(len(replies) for replies in series))
-    maximum = max(1.0, max(values, default=0) * 1.2)
+    import math
+
+    sample_maximum = max(1.0, max(values, default=0))
+    magnitude = 10 ** math.floor(math.log10(sample_maximum / 4))
+    rough_step = sample_maximum / 4 / magnitude
+
+    tick_step = (
+        1 if rough_step <= 1 else
+        2 if rough_step <= 2 else
+        5 if rough_step <= 5 else 10
+    ) * magnitude
+
+    maximum = math.ceil(sample_maximum / tick_step) * tick_step
 
     left, right = x + 31, x + width - 10
     bottom, top = y - height + 39, y - 35
@@ -243,8 +255,9 @@ def _latency_chart(
     _text(c, x, y - 22, "Latency (ms)", 7.5, GREY)
 
     # Grid and Y-axis labels
-    for fraction in (0, 0.5, 1):
-        grid_y = bottom + fraction * (top - bottom)
+    for tick in range(round(maximum / tick_step) + 1):
+        value = tick * tick_step
+        grid_y = bottom + (value / maximum) * (top - bottom)
 
         c.setStrokeColor(LINE)
         c.setLineWidth(0.5)
@@ -252,7 +265,7 @@ def _latency_chart(
 
         _text(
             c, x, grid_y - 3,
-            f"{maximum * fraction:.1f}", 7, GREY
+            f"{value:g}", 7, GREY
         )
 
     # Packet sequence labels
@@ -374,7 +387,7 @@ def _response_chart(
             gap + 8 + 5 + failed_width
         )
 
-        legend_x = x + width - legend_width / 2
+        legend_x = x + (width - legend_width) / 2
         legend_y = y - height + 10
 
         c.setFillColor(VIOLET)
@@ -416,14 +429,14 @@ def _response_chart(
         left, right = x + 30, x + width - 10
         bottom, top = y - height + 39, y - 35
 
-        maximum = max(
-            4, *(sum(pair) for pair in counts)
-        )
+        import math
+
+        raw_maximum = max(1, *(sum(pair) for pair in counts))
+        tick_step = max(1, math.ceil(raw_maximum / 4))
+        maximum = math.ceil(raw_maximum / tick_step) * tick_step
 
         # Grid and packet count labels
-        for value in sorted({
-            0, (maximum + 1) // 2, maximum
-        }):
+        for value in range(0, maximum + 1, tick_step):
             grid_y = bottom + (
                 value / maximum
             ) * (top - bottom)
@@ -490,8 +503,8 @@ def _report_header(
             if image.is_file():
                 c.drawImage(
                     ImageReader(str(image)),
-                    24, H - 66,
-                    width=44, height=44,
+                    24, H - 82,
+                    width=64, height=64,
                     preserveAspectRatio=True,
                     anchor="c",
                     mask="auto"
@@ -500,10 +513,10 @@ def _report_header(
             pass
 
     # Branding at the upper-left corner
-    _text(c, 76, H - 43, "UGNAY", 14, NAVY, True)
+    _text(c, 94, H - 51, "UGNAY", 21, NAVY, True)
     _text(
-        c, 76, H - 59,
-        "Network Health Checker", 8, GREY
+        c, 94, H - 65,
+        "Network Health Checker", 11, GREY
     )
 
     # Report title centered below the branding
@@ -555,7 +568,20 @@ def _page_one(
     _text(c, MARGIN, 675, name, 12, NAVY, True)
 
     # Trust badge
-    trust = _str(selected.get("trust"), "Review")
+
+    # Trust badge - dynamic colors based on status
+    trust = _str(selected.get("trust"), "review").strip().lower()
+
+    trust_styles = {
+        "trusted": ("Trusted", "#E8F5E9", "#267745"),
+        "review": ("Review", "#FFF3D9", "#9C6105"),
+        "flagged": ("Flagged", "#FDECEF", "#B4263D"),
+    }
+
+    trust_label, bg_color, text_color = trust_styles.get(
+        trust, trust_styles["review"]
+    )
+
     badge_x = min(
         MARGIN + canvas_string_width(
             name, "Helvetica-Bold", 12
@@ -563,14 +589,21 @@ def _page_one(
         W - 112
     )
 
-    c.setFillColor(colors.HexColor("#EAF0FB"))
+    # Badge background
+    c.setFillColor(colors.HexColor(bg_color))
     c.roundRect(
         badge_x, 670, 53, 16, 7,
         fill=1, stroke=0
     )
-    _text(
-        c, badge_x + 8, 675,
-        _fit_text(trust, 39, 8), 8, BLUE
+
+    # Center the trust status text inside the badge
+    c.setFillColor(colors.HexColor(text_color))
+    c.setFont("Helvetica", 8)
+
+    c.drawCentredString(
+        badge_x + 53 / 2,
+        675,
+        trust_label
     )
 
     # Device details arranged in columns
@@ -603,35 +636,39 @@ def _page_one(
         )
 
     # DEVICE CHARTS
+    
+    # PING TEST RESULTS
     chart_width = (W - 2 * MARGIN - 14) / 2
 
-    heading = "Device Latency Trend"
-
-    if selected.get("name"):
-        heading += f" ({selected['name']})"
-
+    # Main section heading
     _text(
-        c, MARGIN, 554,
-        _fit_text(
-            heading, chart_width,
-            9.3, "Helvetica-Bold"
-        ),
+        c, MARGIN, 569,
+        "Ping Test Results",
+        12, NAVY, True
+    )
+
+    # Individual chart titles
+    _text(
+        c, MARGIN, 549,
+        "Latency Trend",
         9.3, NAVY, True
     )
 
-    _latency_chart(
-        c, MARGIN, 554,
-        chart_width, 187, history[:3]
-    )
-
     _text(
-        c, MARGIN + chart_width + 14, 554,
+        c, MARGIN + chart_width + 14, 549,
         "Packet Responses",
         9.3, NAVY, True
     )
 
+    # Left: latency line chart
+    _latency_chart(
+        c, MARGIN, 549,
+        chart_width, 187, history[:3]
+    )
+
+    # Right: packet response bar chart
     _response_chart(
-        c, MARGIN + chart_width + 14, 554,
+        c, MARGIN + chart_width + 14, 549,
         chart_width, 187, history[:3]
     )
 

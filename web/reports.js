@@ -368,7 +368,7 @@ window.UgnayReports = (() => {
         // Download the report automatically.
         const link = document.createElement("a");
         link.href = downloadUrl;
-        link.download = `UGNAY-scan-${scanId}-report.pdf`;
+        link.download = `UGNAY_Network_Health_Report.pdf`;
 
         document.body.appendChild(link);
         link.click();

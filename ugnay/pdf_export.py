@@ -220,7 +220,7 @@ def _latency_chart(
 ) -> None:
     """Draw latency values for individual ping requests."""
 
-    _chart_title(c, x, y, "Device Latency Trend")
+    # _chart_title(c, x, y, "Device Latency Trend")  //to be deleted
 
     replies = _ping_replies(ping)
 
@@ -309,7 +309,7 @@ def _response_chart(
 ) -> None:
     """Draw the successful and unanswered ping counts."""
 
-    _chart_title(c, x, y, "Packet Response Summary")
+    # _chart_title(c, x, y, "Packet Response Summary")  to be deleted
 
     sent, received, _, _ = _ping_metrics(ping)
     failed = sent - received
@@ -335,7 +335,7 @@ def _response_chart(
     left = x + 30
     right = x + width - 10
     bottom = y - height + 28
-    top = y - 48
+    top = y - 36
 
     maximum = max(4, sent)
     plot_height = top - bottom
@@ -390,13 +390,12 @@ def _response_chart(
     )
 
 
-
 def _report_header(
     c: canvas.Canvas,
     scan: Mapping[str, Any],
     logo_path: str | Path | None = None
 ) -> None:
-    """Draw the official UGNAY report header."""
+    """UGNAY branding and centered report title."""
 
     if logo_path:
         try:
@@ -404,8 +403,8 @@ def _report_header(
             if image.is_file():
                 c.drawImage(
                     ImageReader(str(image)),
-                    MARGIN, H - 95,
-                    width=42, height=42,
+                    24, H - 66,
+                    width=44, height=44,
                     preserveAspectRatio=True,
                     anchor="c",
                     mask="auto"
@@ -413,28 +412,20 @@ def _report_header(
         except (OSError, ValueError):
             pass
 
+    # Branding at the upper-left corner
+    _text(c, 76, H - 43, "UGNAY", 14, NAVY, True)
     _text(
-        c, MARGIN + 53, H - 63,
-        "UGNAY", 15, NAVY, True
+        c, 76, H - 59,
+        "Network Health Checker", 8, GREY
     )
 
-    _text(
-        c, MARGIN + 53, H - 80,
-        "Network Health Checker", 9, GREY
-    )
-
+    # Report title centered below the branding
     c.setFillColor(NAVY)
-    c.setFont("Helvetica-Bold", 15)
-    c.drawRightString(
-        W - MARGIN, H - 65, "Summary Report"
+    c.setFont("Helvetica-Bold", 17)
+    c.drawCentredString(
+        W / 2, H - 102,
+        "Summary Report"
     )
-
-    _text(
-        c, MARGIN, H - 107,
-        f"Date: {_dt(scan.get('scanned_at'))}",
-        9, GREY
-    )
-
 
 
 def _page_one(
@@ -468,55 +459,58 @@ def _page_one(
     _report_header(c, scan, logo_path)
 
     # DEVICE INFORMATION
-    _text(
-        c, MARGIN, 715,
-        "Device Information", 12, NAVY, True
-    )
+    _text(c, MARGIN, 704, "Device Info", 8, GREY)
 
     name = _fit_text(
         selected.get("name", "No device selected"),
-        350, 12, "Helvetica-Bold"
+        310, 12, "Helvetica-Bold"
+    )
+    _text(c, MARGIN, 675, name, 12, NAVY, True)
+
+    # Trust badge
+    trust = _str(selected.get("trust"), "Review")
+    badge_x = min(
+        MARGIN + canvas_string_width(
+            name, "Helvetica-Bold", 12
+        ) + 14,
+        W - 112
     )
 
-    _text(c, MARGIN, 693, name, 12, NAVY, True)
-
-    trust = selected.get("trust", "Review")
-    c.setFont("Helvetica-Bold", 9)
-    c.setFillColor(BLUE)
-    c.drawRightString(
-        W - MARGIN, 693, _str(trust)
+    c.setFillColor(colors.HexColor("#EAF0FB"))
+    c.roundRect(
+        badge_x, 670, 53, 16, 7,
+        fill=1, stroke=0
+    )
+    _text(
+        c, badge_x + 8, 675,
+        _fit_text(trust, 39, 8), 8, BLUE
     )
 
+    # Device details arranged in columns
     fields = [
-        ("Hostname", selected.get("hostname")),
-        ("IP address", selected.get("ip_address")),
-        ("Connected subnet", scan.get("subnet")),
+        ("Hostname", selected.get("hostname"), MARGIN, 646),
+        ("IP address", selected.get("ip_address"), 250, 646),
+        ("Connected subnet", scan.get("subnet"), 446, 646),
         ("First discovered", _dt(
             selected.get("first_discovered")
-        )),
+        ), MARGIN, 604),
         ("Last scan response", _dt(
             selected.get("last_scan_response")
-        )),
+        ), 250, 604),
     ]
 
-    positions = [
-        (MARGIN, 670),
-        (MARGIN, 649),
-        (MARGIN, 628),
-        (310, 670),
-        (310, 649),
-    ]
-
-    for (label, value), (x, y) in zip(fields, positions):
+    for label, value, x, y in fields:
         _text(c, x, y, label, 8, GREY)
 
-        offset = 100 if x == MARGIN else 92
-        available = (
-            140 if x == MARGIN else W - MARGIN - x - offset
-        )
+        available = W - MARGIN - x - 6
+
+        if x == MARGIN:
+            available = 180
+        elif x == 250:
+            available = 170
 
         _text(
-            c, x + offset, y,
+            c, x, y - 15,
             _fit_text(value, available, 8.5),
             8.5, NAVY
         )
@@ -524,124 +518,118 @@ def _page_one(
     # DEVICE CHARTS
     chart_width = (W - 2 * MARGIN - 14) / 2
 
+    heading = "Device Latency Trend"
+
+    if selected.get("name"):
+        heading += f" ({selected['name']})"
+
+    _text(
+        c, MARGIN, 554,
+        _fit_text(
+            heading, chart_width,
+            9.3, "Helvetica-Bold"
+        ),
+        9.3, NAVY, True
+    )
+
     _latency_chart(
-        c, MARGIN, 592,
-        chart_width, 190, latest
+        c, MARGIN, 554,
+        chart_width, 187, latest
     )
 
     _response_chart(
-        c, MARGIN + chart_width + 14, 592,
-        chart_width, 190, latest
+        c, MARGIN + chart_width + 14, 554,
+        chart_width, 187, latest
     )
 
     # DEVICE CONNECTIVITY SUMMARY
     _text(
-        c, MARGIN, 373,
+        c, MARGIN, 342,
         "Device Connectivity Summary",
         12, NAVY, True
     )
 
-    sent = sum(
+    packets_sent = sum(
         len(test.get("replies") or [])
         for test in history
     )
 
-    count = selected.get(
-        "ping_tests_conducted", len(history)
-    )
+    summary_lines = [
+        f"Packets sent: {packets_sent}",
+        f"Ping tests conducted: {len(history)}",
+        (
+            f"Latest test: "
+            f"{_ms(latest.get('average_latency_ms'))} / "
+            f"{_pct(latest.get('packet_loss_percent'))} loss"
+            if latest else "Latest test: No test yet"
+        ),
+    ]
 
-    _text(
-        c, MARGIN, 352,
-        f"Packets sent: {sent}", 9, NAVY
-    )
+    for i, value in enumerate(summary_lines):
+        _text(
+            c, MARGIN + 8,
+            320 - i * 17,
+            "- " + value, 8.5, NAVY
+        )
 
-    _text(
-        c, MARGIN, 334,
-        f"Ping tests conducted: {count}", 9, NAVY
-    )
-
-    latest_text = (
-        f"{_ms(latest.get('average_latency_ms'))} / "
-        f"{_pct(latest.get('packet_loss_percent'))} loss"
-        if latest else "No test yet"
-    )
-
-    _text(
-        c, MARGIN, 316,
-        f"Latest test: {latest_text}", 9, NAVY
-    )
 
     # DEVICE CONNECTIVITY TEST LOGS
     _text(
-        c, MARGIN, 285,
+        c, MARGIN, 240,
         "Device Connectivity Test Logs",
         12, NAVY, True
     )
 
+    # Show up to 5 packets from the latest ping test.
+    replies = _ping_replies(latest)
+    visible_replies = replies[-5:]
+
     columns = [
         (MARGIN, "Packet"),
-        (117, "Success"),
-        (191, "Failure"),
-        (266, "Error"),
-        (338, "Test Time"),
+        (125, "Response"),
+        (270, "Latency"),
+        (375, "Test Time"),
     ]
 
     for x, heading in columns:
-        _text(
-            c, x, 265,
-            heading, 8, GREY, True
-        )
+        _text(c, x, 215, heading, 8, GREY, True)
 
     c.setStrokeColor(LINE)
-    c.line(MARGIN, 257, W - MARGIN, 257)
+    c.setLineWidth(0.6)
+    c.line(MARGIN, 206, W - MARGIN, 206)
 
-    rows = []
-
-    for test in history:
-        for reply in _ping_replies(test):
-            rows.append((
-                reply,
-                test.get("tested_at")
-            ))
-
-    if not rows:
+    if not visible_replies:
         _text(
-            c, MARGIN, 239,
+            c, MARGIN, 187,
             "No ping test logs available.",
             9, GREY
         )
     else:
-        # Limit rows to keep the report on one page.
-        for index, (reply, tested_at) in enumerate(
-            rows[:10]
-        ):
-            y = 241 - index * 14
-            success = reply["latency_ms"] is not None
+        for index, reply in enumerate(visible_replies):
+            y = 187 - index * 18
+
+            latency_value = reply["latency_ms"]
+            success = latency_value is not None
 
             values = [
                 reply["sequence"],
-                "1" if success else "0",
-                "0" if success else "1",
-                "-",
-                _dt(tested_at),
+                "Received" if success else "No response",
+                f"{latency_value:.1f} ms" if success else "-",
+                _dt(latest.get("tested_at")),
             ]
 
             for (x, _), value in zip(columns, values):
-                _text(
-                    c, x, y,
-                    value, 8, NAVY
-                )
+                _text(c, x, y, value, 8.5, NAVY)
 
-        if len(rows) > 10:
+        if len(replies) > 5:
             _text(
-                c, MARGIN, 83,
-                f"Showing 10 of {len(rows)} saved packet records.",
+                c, MARGIN, 90,
+                f"Showing the latest 5 of {len(replies)} packets "
+                "from the most recent ping test.",
                 8, GREY
             )
-
+    
     _footer(c, 1, scan)
-
-
 
 def _page_two(
     c: canvas.Canvas,
@@ -739,218 +727,188 @@ def _page_two(
 
     # OVERALL NETWORK ASSESSMENT
     _text(
-        c, MARGIN, 710,
+        c, MARGIN, 708,
         "Overall Network Assessment",
-        13, NAVY, True
+        12, NAVY, True
     )
 
     _text(
-        c, MARGIN, 688,
-        f"Selected scan: {_dt(scan.get('scanned_at'))}",
+        c, MARGIN, 683,
+        "Selected network scan, covering all discovered devices.",
         9, GREY
     )
 
-    status_color = (
+    c.setStrokeColor(LINE)
+    c.setLineWidth(0.5)
+    c.line(MARGIN, 666, W - MARGIN, 666)
+
+    # Overall network status
+    health_color = (
         RED if health == "Needs attention"
         else AMBER if health in (
-            "Fair", "Partially tested", "Not tested"
+            "Partially tested", "Fair", "Not tested"
         )
         else GREEN if health == "Healthy"
         else GREY
     )
 
-    _text(c, MARGIN, 660, "Overall status:", 10, GREY)
-    _text(c, 143, 660, health, 10, status_color, True)
+    _text(
+        c, MARGIN, 639,
+        f"Status: {health}",
+        10, health_color, True
+    )
 
-    # Network summary metrics
-    _text(c, MARGIN, 633, "Devices tested", 8, GREY)
-    _text(c, MARGIN, 615, f"{tested} / {total}",
-          12, NAVY, True)
+    # Three network-wide metrics
+    metrics = [
+        (MARGIN, "Devices tested", f"{tested}/{total}"),
+        (240, "Avg. latency", _ms(avg_latency)),
+        (412, "Avg. loss", _pct(avg_loss)),
+    ]
 
-    _text(c, 220, 633, "Average latency", 8, GREY)
-    _text(c, 220, 615, _ms(avg_latency),
-          12, NAVY, True)
+    for x, label, value in metrics:
+        _text(c, x, 615, label, 8.5, GREY)
+        _text(c, x, 594, value, 12, NAVY, True)
 
-    _text(c, 392, 633, "Average packet loss", 8, GREY)
-    _text(c, 392, 615, _pct(avg_loss),
-          12, NAVY, True)
+    c.setStrokeColor(LINE)
+    c.line(MARGIN, 573, W - MARGIN, 573)
 
     # DISCOVERED DEVICES
     _text(
-        c, MARGIN, 580,
-        "Discovered Devices",
-        12, NAVY, True
+        c, MARGIN, 548,
+        "Discovered Devices", 10, NAVY, True
     )
 
-    columns = [
-        (MARGIN, "Device Name"),
-        (207, "IP Address"),
-        (316, "Trust"),
-        (393, "Ping Status"),
-    ]
+    # Reference layout: two columns only
+    _text(c, MARGIN, 516, "Device Name", 8.5, BLUE)
+    _text(c, 372, 516, "IP Address", 8.5, BLUE)
 
-    for x, heading in columns:
-        _text(c, x, 556, heading, 8, GREY, True)
+    shown_devices = devices[:8]
 
-    c.setStrokeColor(LINE)
-    c.setLineWidth(0.6)
-    c.line(MARGIN, 549, W - MARGIN, 549)
+    for index, item in enumerate(shown_devices):
+        y = 493 - index * 23
 
-    if not devices:
         _text(
-            c, MARGIN, 529,
-            "No devices discovered in this scan.",
-            9, GREY
+            c, MARGIN, y,
+            _fit_text(item.get("name"), 300, 8.5),
+            8.5, NAVY
         )
-    else:
-        for index, device in enumerate(devices[:10]):
-            y = 530 - index * 17
 
-            values = [
-                _fit_text(
-                    device.get("name"), 150, 8
-                ),
-                _str(device.get("ip_address"), "-"),
-                _str(device.get("trust"), "Review"),
-                _device_status(device),
-            ]
+        _text(
+            c, 372, y,
+            _fit_text(item.get("ip_address"), 130, 8.5),
+            8.5, NAVY
+        )
 
-            for (x, _), value in zip(columns, values):
-                _text(c, x, y, value, 8, NAVY)
+        # Thin row separators
+        c.setStrokeColor(
+            colors.HexColor("#EDF1F4")
+        )
+        c.setLineWidth(0.45)
+        c.line(
+            MARGIN, y - 8,
+            W - MARGIN, y - 8
+        )
 
-        if len(devices) > 10:
-            _text(
-                c, MARGIN, 351,
-                f"Showing 10 of {len(devices)} discovered devices.",
-                8, GREY
-            )
+    # Adjust position for longer device lists
+    findings_y = (
+        317 if len(shown_devices) <= 6
+        else 317 - (len(shown_devices) - 6) * 23
+    )
+
+    if total > len(shown_devices):
+        _text(
+            c, MARGIN, findings_y + 13,
+            f"Showing {len(shown_devices)} of {total} devices.",
+            8, GREY
+        )
 
     # CONNECTIVITY FINDINGS
     _text(
-        c, MARGIN, 334,
+        c, MARGIN, findings_y,
         "Connectivity Findings",
-        12, NAVY, True
+        10, NAVY, True
     )
 
-    unreachable = sum(
-        ping.get("status") == "Unreachable"
-        for _, ping in measured
-    )
-
-    high_loss = sum(
-        (value := _number(
-            ping.get("packet_loss_percent")
-        )) is not None and value >= 10
-        for _, ping in measured
-    )
-
-    some_loss = sum(
-        (value := _number(
-            ping.get("packet_loss_percent")
-        )) is not None and 0 < value < 10
-        for _, ping in measured
-    )
-
-    high_latency = sum(
-        (value := _number(
-            ping.get("average_latency_ms")
-        )) is not None and value >= 100
-        for _, ping in measured
-    )
-
-    elevated_latency = sum(
-        (value := _number(
-            ping.get("average_latency_ms")
-        )) is not None and 50 <= value < 100
-        for _, ping in measured
-    )
-
-    findings = []
-
-    if unreachable:
-        findings.append(
-            f"{unreachable} device(s) returned no ping responses. "
-            "Check connectivity and ICMP settings."
+    if total == 0:
+        finding = "No devices were discovered in this scan."
+    elif tested == 0:
+        finding = (
+            "No devices have a saved ping test for this scan."
         )
-
-    if high_loss or some_loss:
-        findings.append(
-            f"{high_loss} device(s) had high packet loss; "
-            f"{some_loss} had some packet loss."
-        )
-
-    if high_latency or elevated_latency:
-        findings.append(
-            f"{high_latency} device(s) had high latency; "
-            f"{elevated_latency} had elevated latency."
-        )
-
-    if untested:
-        findings.append(
+    elif untested > 0:
+        finding = (
             f"{untested} of {total} discovered devices "
-            "have no saved ping test for this scan."
+            "remain untested."
+        )
+    else:
+        finding = (
+            "All discovered devices have saved ping tests."
         )
 
-    if not findings:
-        findings.append(
-            "No connectivity issues detected in the "
-            "available latest ping results."
-            if measured else
-            "No ping test results are available for this scan."
+    high_loss_count = sum(
+        (_number(ping.get("packet_loss_percent")) or 0) >= 10
+        for _, ping in measured
+    )
+
+    high_latency_count = sum(
+        (_number(ping.get("average_latency_ms")) or 0) >= 100
+        for _, ping in measured
+    )
+
+    if high_loss_count or high_latency_count:
+        finding += (
+            f" High loss: {high_loss_count} device(s);"
+            f" high latency: {high_latency_count} device(s)."
         )
 
-    y = 313
-
-    for finding in findings:
-        y = _wrapped(
-            c, "- " + finding,
-            MARGIN + 4, y,
-            W - 2 * MARGIN - 8,
-            size=8.5,
-            leading=12,
-            color=NAVY,
-            max_lines=2
-        )
-        y -= 6
+    finding_end = _wrapped(
+        c, finding,
+        MARGIN, findings_y - 24,
+        W - 2 * MARGIN,
+        8.5, 13, NAVY
+    )
 
     # GENERAL SECURITY RECOMMENDATIONS
-    _text(
-        c, MARGIN, 197,
-        "General Security Recommendations",
-        12, NAVY, True
+    security_y = min(
+        findings_y - 61,
+        finding_end - 22
     )
 
-    recommendations = [
-        "Use strong Wi-Fi and router administrator passwords.",
-        "Keep router firmware updated.",
-        "Enable appropriate firewall protection.",
-    ]
+    _text(
+        c, MARGIN, security_y,
+        "General Security Recommendations",
+        10, NAVY, True
+    )
 
-    y = 176
-
-    for recommendation in recommendations:
-        _text(
-            c, MARGIN + 4, y,
-            "- " + recommendation,
-            8.5, NAVY
-        )
-        y -= 21
+    advice_end = _wrapped(
+        c,
+        "Use strong Wi-Fi passwords, update router firmware, "
+        "and enable firewall protection.",
+        MARGIN, security_y - 24,
+        W - 2 * MARGIN,
+        8.5, 13, NAVY
+    )
 
     # REPORT NOTE
+    divider_y = advice_end - 12
+
+    c.setStrokeColor(LINE)
+    c.line(
+        MARGIN, divider_y,
+        W - MARGIN, divider_y
+    )
+
     _wrapped(
         c,
         "Network averages cover tested devices only. "
         "Security recommendations are general precautions, "
         "not detected vulnerabilities.",
-        MARGIN, 90,
+        MARGIN, divider_y - 24,
         W - 2 * MARGIN,
-        size=8,
-        leading=11,
-        color=GREY
+        7.5, 11, GREY
     )
 
     _footer(c, 2, scan)
-
 
 
 def generate_pdf(

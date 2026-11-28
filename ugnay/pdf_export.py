@@ -168,7 +168,6 @@ def _ping_replies(
 
     return output
 
-
 def _ping_metrics(
     ping: Mapping[str, Any] | None
 ) -> tuple[int, int, float | None, float | None]:
@@ -209,43 +208,43 @@ def _chart_title(
     _text(c, x, y, text, 12, NAVY, True)
 
 
-
 def _latency_chart(
     c: canvas.Canvas,
     x: float,
     y: float,
     width: float,
     height: float,
-    ping: Mapping[str, Any] | None
+    tests: Sequence[Mapping[str, Any]] | None
 ) -> None:
-    """Draw latency values for individual ping requests."""
+    """Plot packet latency for the latest three tests in this scan."""
 
-    # _chart_title(c, x, y, "Device Latency Trend")  //to be deleted
+    tests = list(tests or [])[:3]
 
-    replies = _ping_replies(ping)
-
-    left = x + 30
-    right = x + width - 10
-    bottom = y - height + 28
-    top = y - 36
-
-    if not replies:
+    if not tests:
         _text(c, x + 12, y - 70,
               "No ping data available.", 9, GREY)
         return
 
+    series = [_ping_replies(test) for test in tests]
+
     values = [
         reply["latency_ms"]
+        for replies in series
         for reply in replies
         if reply["latency_ms"] is not None
     ]
 
+    count = max(1, *(len(replies) for replies in series))
     maximum = max(1.0, max(values, default=0) * 1.2)
-    plot_height = top - bottom
 
-    # Horizontal grid lines and latency labels
+    left, right = x + 31, x + width - 10
+    bottom, top = y - height + 39, y - 35
+
+    _text(c, x, y - 22, "Latency (ms)", 7.5, GREY)
+
+    # Grid and Y-axis labels
     for fraction in (0, 0.5, 1):
-        grid_y = bottom + fraction * plot_height
+        grid_y = bottom + fraction * (top - bottom)
 
         c.setStrokeColor(LINE)
         c.setLineWidth(0.5)
@@ -253,50 +252,98 @@ def _latency_chart(
 
         _text(
             c, x, grid_y - 3,
-            f"{maximum * fraction:.1f}",
-            7, GREY
+            f"{maximum * fraction:.1f}", 7, GREY
         )
 
-    _text(c, x, y - 23, "Latency (ms)", 7.5, GREY)
+    # Packet sequence labels
+    label_step = max(1, (count + 5) // 6)
 
-    count = len(replies)
-    previous = None
-    label_step = max(1, (count + 7) // 8)
+    for packet in range(1, count + 1):
+        if (
+            packet == 1
+            or packet == count
+            or (packet - 1) % label_step == 0
+        ):
+            px = left + (
+                (packet - 1) / max(1, count - 1)
+            ) * (right - left)
 
-    for index, reply in enumerate(replies):
-        px = (
-            (left + right) / 2
-            if count == 1
-            else left + index * (right - left) / (count - 1)
-        )
-
-        latency_value = reply["latency_ms"]
-
-        if index % label_step == 0 or index == count - 1:
             c.setFillColor(GREY)
-            c.setFont("Helvetica", 7)
+            c.setFont("Helvetica", 6.5)
             c.drawCentredString(
-                px, bottom - 13,
-                str(reply["sequence"])
+                px, bottom - 13, str(packet)
             )
 
-        if latency_value is None:
-            previous = None
-            continue
+    # Draw one line for each saved test
+    labels = ("Latest", "Previous 1", "Previous 2")
+    palette = (
+    BLUE,                         # Latest
+    colors.HexColor("#C3427A"),  # Previous 1
+    colors.HexColor("#578A3F"),  # Previous 2
+    )
 
-        py = bottom + (
-            latency_value / maximum
-        ) * plot_height
+    for i, replies in enumerate(series):
+        previous = None
+        previous_seq = None
 
-        if previous is not None:
-            c.setStrokeColor(BLUE)
-            c.setLineWidth(1.6)
-            c.line(previous[0], previous[1], px, py)
+        for j, reply in enumerate(replies):
+            value = reply["latency_ms"]
+            sequence = _number(reply.get("sequence"))
+            sequence = (
+                int(sequence)
+                if sequence is not None else j + 1
+            )
 
-        c.setFillColor(BLUE)
-        c.circle(px, py, 2.8, stroke=0, fill=1)
+            if value is None:
+                previous = None
+                previous_seq = None
+                continue
 
-        previous = (px, py)
+            px = left + (
+                (sequence - 1) / max(1, count - 1)
+            ) * (right - left)
+
+            py = bottom + (
+                value / maximum
+            ) * (top - bottom)
+
+
+            
+            if (
+                previous is not None
+                and sequence == previous_seq + 1
+            ):
+                c.setStrokeColor(palette[i])
+                c.setLineWidth(1.6)
+                c.setDash()
+                c.line(*previous, px, py)
+
+            c.setFillColor(palette[i])
+            c.circle(px, py, 2.3, stroke=0, fill=1)
+
+
+            previous = (px, py)
+            previous_seq = sequence
+
+        # Legend below the latency graph
+        
+        # Compact single-row legend below the latency chart
+        legend_x = x + 25 + i * (width - 35) / 3
+        legend_y = bottom - 29
+
+        c.setStrokeColor(palette[i])
+        c.setLineWidth(2)
+        c.setDash()
+
+        c.line(
+            legend_x, legend_y,
+            legend_x + 13, legend_y
+        )
+
+        _text(
+            c, legend_x + 17, legend_y - 3,
+            labels[i], 6.5, GREY
+        )
 
 
 def _response_chart(
@@ -305,89 +352,129 @@ def _response_chart(
     y: float,
     width: float,
     height: float,
-    ping: Mapping[str, Any] | None
+    tests: Sequence[Mapping[str, Any]] | None
 ) -> None:
-    """Draw the successful and unanswered ping counts."""
+        """Compare replies and unanswered packets across tests."""
 
-    # _chart_title(c, x, y, "Packet Response Summary")  to be deleted
+        tests = list(tests or [])[:3]
 
-    sent, received, _, _ = _ping_metrics(ping)
-    failed = sent - received
+        # Compact single-row legend below the packet-response chart.
+        font_size = 7
+        gap = 12
 
-    # Legend above the graph - always visible.
-    c.setFillColor(VIOLET)
-    c.rect(x + 2, y - 30, 8, 8, stroke=0, fill=1)
-    _text(c, x + 15, y - 28, "Replies", 8, GREY)
-
-    c.setFillColor(MAGENTA)
-    c.rect(x + width * 0.50, y - 30,
-           8, 8, stroke=0, fill=1)
-    _text(
-        c, x + width * 0.50 + 13,
-        y - 28, "No response", 8, GREY
-    )
-
-    if sent == 0:
-        _text(c, x + 12, y - 75,
-              "No ping test available.", 9, GREY)
-        return
-
-    left = x + 30
-    right = x + width - 10
-    bottom = y - height + 28
-    top = y - 36
-
-    maximum = max(4, sent)
-    plot_height = top - bottom
-
-    # Grid and packet-count labels
-    for fraction in (0, 0.5, 1):
-        grid_y = bottom + fraction * plot_height
-
-        c.setStrokeColor(LINE)
-        c.setLineWidth(0.5)
-        c.line(left, grid_y, right, grid_y)
-
-        _text(
-            c, x + 5, grid_y - 3,
-            f"{maximum * fraction:g}",
-            7, GREY
+        replies_width = canvas_string_width(
+            "Replies", "Helvetica", font_size
+        )
+        failed_width = canvas_string_width(
+            "No response", "Helvetica", font_size
         )
 
-    center = (left + right) / 2
-    bar_width = 32
+        legend_width = (
+            8 + 5 + replies_width +
+            gap + 8 + 5 + failed_width
+        )
 
-    bars = [
-        (center - 43, received, VIOLET),
-        (center + 14, failed, MAGENTA)
-    ]
+        legend_x = x + width - legend_width / 2
+        legend_y = y - height + 10
 
-    for bar_x, value, color in bars:
-        bar_height = (value / maximum) * plot_height
-
-        c.setFillColor(color)
+        c.setFillColor(VIOLET)
         c.rect(
-            bar_x,
-            bottom,
-            bar_width,
-            bar_height,
-            stroke=0,
-            fill=1
+            legend_x, legend_y, 8, 8,
+            stroke=0, fill=1
+        )
+        _text(
+            c, legend_x + 13, legend_y + 2,
+            "Replies", font_size, GREY
         )
 
-        c.setFillColor(NAVY)
-        c.setFont("Helvetica-Bold", 8)
-        c.drawCentredString(
-            bar_x + bar_width / 2,
-            bottom + bar_height + 6,
-            str(value)
+        second_x = legend_x + 13 + replies_width + gap
+
+        c.setFillColor(MAGENTA)
+        c.rect(
+            second_x, legend_y, 8, 8,
+            stroke=0, fill=1
+        )
+        _text(
+            c, second_x + 13, legend_y + 2,
+            "No response", font_size, GREY
         )
 
-    c.setFillColor(GREY)
-    c.setFont("Helvetica", 8)
-    c.drawCentredString(
-        center, bottom - 16, "Latest"
-    )
+        if not tests:
+            _text(
+                c, x + 12, y - 70,
+                "No ping test available.", 9, GREY
+            )
+            return
+
+        # Actual saved reply counts per test
+        counts = []
+
+        for test in tests:
+            sent, received, _, _ = _ping_metrics(test)
+            counts.append((received, sent - received))
+
+        left, right = x + 30, x + width - 10
+        bottom, top = y - height + 39, y - 35
+
+        maximum = max(
+            4, *(sum(pair) for pair in counts)
+        )
+
+        # Grid and packet count labels
+        for value in sorted({
+            0, (maximum + 1) // 2, maximum
+        }):
+            grid_y = bottom + (
+                value / maximum
+            ) * (top - bottom)
+
+            c.setStrokeColor(LINE)
+            c.setLineWidth(0.5)
+            c.line(left, grid_y, right, grid_y)
+
+            _text(
+                c, x + 5, grid_y - 3,
+                str(value), 7, GREY
+            )
+
+        labels = ("Latest", "Previous 1", "Previous 2")
+
+        group_width = (right - left) / len(counts)
+        bar_width = min(19, group_width * 0.24)
+
+        for i, (received, failed) in enumerate(counts):
+            center = left + (i + 0.5) * group_width
+
+            bars = (
+                (center - bar_width - 2, received, VIOLET),
+                (center + 2, failed, MAGENTA)
+            )
+
+            for bar_x, value, color in bars:
+                bar_height = (
+                    value / maximum
+                ) * (top - bottom)
+
+                c.setFillColor(color)
+                c.rect(
+                    bar_x, bottom,
+                    bar_width, bar_height,
+                    stroke=0, fill=1
+                )
+
+                c.setFillColor(NAVY)
+                c.setFont("Helvetica-Bold", 6.7)
+                c.drawCentredString(
+                    bar_x + bar_width / 2,
+                    bottom + bar_height + 5,
+                    str(value)
+                )
+
+            c.setFillColor(GREY)
+            c.setFont("Helvetica", 6.8)
+            c.drawCentredString(
+                center, bottom - 15, labels[i]
+            )
 
 
 def _report_header(
@@ -534,12 +621,18 @@ def _page_one(
 
     _latency_chart(
         c, MARGIN, 554,
-        chart_width, 187, latest
+        chart_width, 187, history[:3]
+    )
+
+    _text(
+        c, MARGIN + chart_width + 14, 554,
+        "Packet Responses",
+        9.3, NAVY, True
     )
 
     _response_chart(
         c, MARGIN + chart_width + 14, 554,
-        chart_width, 187, latest
+        chart_width, 187, history[:3]
     )
 
     # DEVICE CONNECTIVITY SUMMARY

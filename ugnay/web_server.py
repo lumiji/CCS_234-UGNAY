@@ -59,6 +59,7 @@ def pdf_snapshot(scan_report, selected_device_id=None):
             "trust": (device.get("trust") or "review").capitalize(),
             "first_discovered": device.get("first_seen"),
             "last_scan_response": device.get("last_seen"),
+            "ping_tests_conducted": len(history),
             "ping_history": history,
             "ping": history[0] if history else None,
         })

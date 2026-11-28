@@ -355,8 +355,20 @@ window.UgnayDashboard = (() => {
     }
     const colors = ["#a7d7ff", "#ed7da9", "#a9df82"];
     tests.forEach((test, index) => {
-      const label = node("span"), swatch = node("i", undefined, "latency-swatch"); swatch.style.setProperty("--series-color", colors[index]); swatch.setAttribute("aria-hidden", "true");
-      label.append(swatch, document.createTextNode(`${index === 0 ? "Latest" : "Previous"} · ${date(test.tested_at)}`)); byId(ids.legend).append(label);
+
+      const label = node("span");
+      const swatch = node("i", undefined, "latency-swatch");
+
+      swatch.style.setProperty("--series-color", colors[index]);
+      swatch.setAttribute("aria-hidden", "true");
+
+      const labelText = ids.chart === "report-line-chart"
+        ? (index === 0 ? "Latest" : `Previous ${index}`)
+        : `${index === 0 ? "Latest" : "Previous"} · ${date(test.tested_at)}`;
+
+      label.append(swatch, document.createTextNode(labelText));
+      byId(ids.legend).append(label);
+
       const group = svg("g", { "data-ping-series": index }); let path = "";
       const finish = () => { if (path) group.prepend(svg("path", { d: path, stroke: colors[index], class: "latency-path" })); path = ""; };
       test.replies.forEach((reply) => {

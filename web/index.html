@@ -256,13 +256,87 @@
             <div class="report-health-latest"><svg viewBox="0 0 50 38" width="50" height="38" aria-hidden="true"><path d="M3 19h9L20 4l11 30 7-15h10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong id="report-latest">—</strong><span>latest test</span></div></div>
           </div>
         </section>
+
         <section class="reports-charts" aria-labelledby="report-trend-title">
-          <div class="reports-chart-heading"><h2 id="report-trend-title">Latency trend (selected scan)</h2><div class="report-bar-legend" aria-label="Reply count chart legend"><span><i class="report-success-swatch"></i>Replies</span><span><i class="report-failure-swatch"></i>No response</span></div></div>
+          <div class="reports-chart-heading">
+            <h2 id="report-trend-title">
+              Ping Test Results 
+            </h2>
+          </div>
+
           <div class="reports-chart-grid">
-            <div class="report-line-panel"><div id="report-line-legend" class="sr-only" aria-label="Displayed ping tests"></div><svg id="report-line-chart" viewBox="0 0 660 300" preserveAspectRatio="none" role="img" aria-labelledby="report-line-title report-line-description" hidden><title id="report-line-title">Reply latency</title><desc id="report-line-description"></desc><g id="report-line-plot"></g></svg><p id="report-line-empty" class="report-chart-empty">Run a ping test to plot measured latency.</p><table class="sr-only"><caption>Latest test replies for the selected report</caption><thead><tr><th>Request</th><th>Latency</th></tr></thead><tbody id="report-reply-data"></tbody></table></div>
-            <div class="report-bar-panel"><svg id="report-bar-chart" viewBox="0 0 420 300" preserveAspectRatio="none" role="img" aria-labelledby="report-bar-title report-bar-description" hidden><title id="report-bar-title">Replies and timeouts by test</title><desc id="report-bar-description"></desc><g id="report-bar-plot"></g></svg><p id="report-bar-empty" class="report-chart-empty">Reply counts will appear after a test.</p></div>
+
+            <!-- LATENCY TREND -->
+            <div class="report-line-panel">
+
+              <h3 class="report-chart-subtitle">Latency Trend</h3>
+
+              <svg id="report-line-chart"
+                  viewBox="0 0 660 300"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-labelledby="report-line-title report-line-description"
+                  hidden>
+                <title id="report-line-title">Reply latency</title>
+                <desc id="report-line-description"></desc>
+                <g id="report-line-plot"></g>
+              </svg>
+
+              <p id="report-line-empty" class="report-chart-empty">
+                Run a ping test to plot measured latency.
+              </p>
+
+              <!-- Single-row latency legend -->
+              <div id="report-line-legend"
+                  class="report-under-legend"
+                  aria-label="Displayed ping tests"></div>
+
+              <table class="sr-only">
+                <caption>Latest test replies for the selected report</caption>
+                <thead>
+                  <tr><th>Request</th><th>Latency</th></tr>
+                </thead>
+                <tbody id="report-reply-data"></tbody>
+              </table>
+
+            </div>
+
+            <!-- PACKET RESPONSES -->
+            <div class="report-bar-panel">
+
+              <h3 class="report-chart-subtitle">Packet Responses</h3>
+
+              <svg id="report-bar-chart"
+                  viewBox="0 0 420 300"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-labelledby="report-bar-title report-bar-description"
+                  hidden>
+                <title id="report-bar-title">Replies and timeouts by test</title>
+                <desc id="report-bar-description"></desc>
+                <g id="report-bar-plot"></g>
+              </svg>
+
+              <p id="report-bar-empty" class="report-chart-empty">
+                Reply counts will appear after a test.
+              </p>
+
+              <!-- Single-row packet response legend -->
+              <div class="report-bar-legend report-under-legend"
+                  aria-label="Packet response legend">
+                <span>
+                  <i class="report-success-swatch"></i>Replies
+                </span>
+                <span>
+                  <i class="report-failure-swatch"></i>No response
+                </span>
+              </div>
+
+            </div>
+
           </div>
         </section>
+
         <div class="reports-details">
           <section class="report-device-info" aria-labelledby="report-info-title"><h2 id="report-info-title">Device Info</h2><div id="report-device-identity" class="report-device-identity"></div><dl id="report-device-facts"></dl><p id="report-device-empty" class="muted">Select a device to view its information.</p></section>
           <section class="report-packets" aria-label="Packet results"><div class="report-packet-scroll"><table><caption class="sr-only">Packet results for all saved tests of the selected device in this scan. Failure means no reply; packet error codes are not recorded.</caption><thead><tr><th>Packet</th><th>Success</th><th>Failure</th><th>Error</th><th>Test Time</th></tr></thead><tbody id="report-packet-rows"></tbody></table><p id="report-packets-empty" class="muted">No ping tests recorded for this device in the selected scan.</p></div></section>
